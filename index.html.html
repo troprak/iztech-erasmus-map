@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IZTECH ERASMUS MAP</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+        }
+        #app-container {
+            position: relative;
+            height: 100vh;
+        }
+        #sidebar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 380px;
+            background-color: #f8fafc;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease-in-out;
+            z-index: 1001; /* Above map */
+        }
+        #sidebar.collapsed {
+            transform: translateX(-100%);
+        }
+        #sidebar.collapsed #sidebar-content {
+            display: none;
+        }
+        #map { 
+            height: 100%;
+            width: 100%;
+        }
+        #sidebar-toggle {
+            position: absolute;
+            top: 50%;
+            left: 380px; /* Start attached to the sidebar */
+            transform: translateY(-50%);
+            width: 24px;
+            height: 48px;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-left: none;
+            border-top-right-radius: 8px;
+            border-bottom-right-radius: 8px;
+            cursor: pointer;
+            z-index: 1002;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: left 0.3s ease-in-out;
+        }
+        #sidebar.collapsed ~ #sidebar-toggle {
+            left: 0;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Modal Styles */
+        .modal-container.hidden { display: none; }
+        .modal-content {
+            background-color: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* Favorite Star Styles */
+        .favorite-btn { cursor: pointer; font-size: 1.5rem; color: #cbd5e1; transition: color 0.2s; }
+        .favorite-btn:hover, .favorite-btn.favorited { color: #facc15; }
+
+        /* Comparison Table Styles */
+        .comparison-table { width: 100%; border-collapse: collapse; }
+        .comparison-table th, .comparison-table td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        .comparison-table th { background-color: rgba(241, 245, 249, 0.8); font-weight: 600; }
+        .comparison-table tr:last-child td { border-bottom: none; }
+        .comparison-table .uni-name-header { font-size: 1.1rem; }
+
+        /* Accordion for city info */
+        details > summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #4f46e5;
+            margin-top: 1rem;
+        }
+        
+        #reset-zoom-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 10px; /* Aligned with Leaflet's default right position */
+            z-index: 1000;
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 500;
+            color: #334155;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+        }
+        #reset-zoom-btn:hover {
+            background-color: rgba(255, 255, 255, 0.75);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        /* Custom Zoom Control Styles */
+        .leaflet-bottom.leaflet-right .leaflet-control-zoom {
+            margin-bottom: 60px; /* ~5px vertical gap */
+            border: none !important;
+            box-shadow: none !important;
+        }
+        .leaflet-control-zoom a {
+            background-color: rgba(255, 255, 255, 0.5) !important;
+            color: #334155 !important;
+            border: 1px solid rgba(0, 0, 0, 0.1) !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+            transition: all 0.2s ease;
+        }
+        .leaflet-control-zoom a:hover {
+            background-color: rgba(255, 255, 255, 0.75) !important;
+        }
+        .leaflet-control-zoom-in {
+            border-top-left-radius: 5px !important;
+            border-top-right-radius: 5px !important;
+            border-bottom: none !important;
+        }
+        .leaflet-control-zoom-out {
+            border-bottom-left-radius: 5px !important;
+            border-bottom-right-radius: 5px !important;
+        }
+    </style>
+</head>
+<body class="bg-slate-50">
+
+    <div id="app-container">
+        <!-- Sidebar -->
+        <div id="sidebar" class="collapsed">
+            <div id="sidebar-content" class="h-full flex flex-col">
+                <div class="p-4 border-b border-slate-200">
+                    <h1 id="program-title" class="text-xl font-bold text-slate-800">IZTECH ERASMUS MAP</h1>
+                    <button id="select-program-btn" class="mt-2 w-full bg-indigo-600 text-white font-bold py-2 px-4 rounded-md hover:bg-indigo-700">Select Your Program</button>
+                    <input type="text" id="search-box" placeholder="Search by name or country..." class="mt-4 w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 hidden">
+                </div>
+                <!-- Tabs -->
+                <div id="tabs-container" class="flex border-b border-slate-200 hidden">
+                    <button data-filter="all" class="flex-1 p-3 font-semibold text-sm text-center bg-white border-b-2 border-indigo-500 text-indigo-600">All</button>
+                    <button data-filter="favorites" class="flex-1 p-3 font-semibold text-sm text-center text-slate-500">Favorites</button>
+                </div>
+                <ul id="university-list" class="overflow-y-auto custom-scrollbar flex-grow">
+                    <!-- University list will be populated by JS -->
+                </ul>
+                <div id="compare-footer" class="p-4 border-t border-slate-200 hidden">
+                     <button id="compare-btn" class="w-full bg-indigo-600 text-white font-bold py-2 px-4 rounded-md hover:bg-indigo-700 disabled:bg-slate-400 disabled:cursor-not-allowed">
+                        Compare Shortlist
+                    </button>
+                    <button id="clear-compare-btn" class="w-full text-center text-sm text-slate-500 hover:text-slate-700 mt-2">Clear Shortlist</button>
+                </div>
+            </div>
+        </div>
+        <!-- Map -->
+        <div id="map"></div>
+        <!-- Sidebar Toggle Button -->
+        <button id="sidebar-toggle" title="Toggle sidebar">
+            <svg id="toggle-icon" class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+        </button>
+        <!-- Reset Zoom Button -->
+        <button id="reset-zoom-btn" title="Reset Zoom">Reset Zoom</button>
+    </div>
+
+    <!-- Modals -->
+    <div id="welcome-modal" class="modal-container fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[1002]">
+        <div class="modal-content rounded-lg shadow-xl p-8 text-center">
+            <h1 class="text-3xl font-bold text-slate-800">IZTECH ERASMUS MAP</h1>
+            <p class="text-slate-600 mt-2 mb-6">Select your program to begin exploring</p>
+            <button id="welcome-select-btn" class="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-md hover:bg-indigo-700">Select Your Program</button>
+        </div>
+    </div>
+
+    <div id="program-modal" class="modal-container hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[1003]">
+        <div class="modal-content rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-slate-300">
+                <h2 class="text-lg font-bold text-slate-800">Select Your Program</h2>
+                <button id="program-modal-close-btn" class="close-modal-btn text-3xl">&times;</button>
+            </div>
+            <div class="p-4 border-b border-slate-200">
+                <input type="text" id="program-search-box" placeholder="Search by program, department, faculty..." class="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div id="program-list-container" class="p-2 overflow-y-auto custom-scrollbar">
+                <!-- Program list will be populated here -->
+            </div>
+        </div>
+    </div>
+    
+    <div id="details-modal" class="modal-container hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[1000] p-4">
+        <div class="modal-content rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-slate-300">
+                <div id="details-modal-title" class="text-lg font-bold"></div>
+                <button class="close-modal-btn text-3xl">&times;</button>
+            </div>
+            <div id="details-modal-body" class="p-6 overflow-y-auto custom-scrollbar"></div>
+        </div>
+    </div>
+    <div id="compare-modal" class="modal-container hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[1000] p-4">
+        <div class="modal-content rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+             <div class="flex justify-between items-center p-4 border-b border-slate-300">
+                <h2 class="text-lg font-bold text-slate-800">University Comparison</h2>
+                <button class="close-modal-btn text-3xl">&times;</button>
+            </div>
+            <div id="compare-modal-body" class="p-6 overflow-y-auto custom-scrollbar"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        const map = L.map('map', { zoomControl: false }).setView([50, 15], 4);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+
+        const iztechPrograms = [
+            { faculty: "Faculty of Architecture", department: "Architecture" },
+            { faculty: "Faculty of Architecture", department: "Architectural Restoration" },
+            { faculty: "Faculty of Architecture", department: "City and Regional Planning" },
+            { faculty: "Faculty of Architecture", department: "Industrial Design" },
+            { faculty: "Faculty of Engineering", department: "Bioengineering" },
+            { faculty: "Faculty of Engineering", department: "Chemical Engineering" },
+            { faculty: "Faculty of Engineering", department: "Civil Engineering" },
+            { faculty: "Faculty of Engineering", department: "Computer Engineering" },
+            { faculty: "Faculty of Engineering", department: "Electrical and Electronics Engineering" },
+            { faculty: "Faculty of Engineering", department: "Energy Systems Engineering" },
+            { faculty: "Faculty of Engineering", department: "Environmental Engineering" },
+            { faculty: "Faculty of Engineering", department: "Food Engineering" },
+            { faculty: "Faculty of Engineering", department: "Materials Science and Engineering" },
+            { faculty: "Faculty of Engineering", department: "Mechanical Engineering" },
+            { faculty: "Faculty of Science", department: "Chemistry" },
+            { faculty: "Faculty of Science", department: "Mathematics" },
+            { faculty: "Faculty of Science", department: "Molecular Biology and Genetics" },
+            { faculty: "Faculty of Science", department: "Physics" },
+            { faculty: "Faculty of Science", department: "Photonics" },
+            { faculty: "School of Foreign Languages", department: "School of Foreign Languages" }
+        ];
+        
+        const erasmusData = {
+            "Architecture": [
+                { id: 400, name: "Beuth University of Applied Sciences Berlin", country: "Germany", city: "Berlin", lat: 52.54, lon: 13.35, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 4°C", cost: "€900-1200/month", website: "https://www.bht-berlin.de/en/", ranking: "Not Ranked", language: "Good selection of project-based courses in English. B1 German certificate may be required.", courses: "Architectural Design, Urban Planning, Building Construction.", cityInfo: "Berlin is Germany's vibrant, multicultural capital. It's a global center for art, architecture, and history, offering an unparalleled student experience with a relatively low cost of living for a major capital." },
+                { id: 401, name: "Hochschule Koblenz", country: "Germany", city: "Koblenz", lat: 50.36, lon: 7.60, weather: "🌷 Spring: 6-17°C, ❄️ Winter: 0-5°C", cost: "€750-950/month", website: "https://www.hs-koblenz.de/en/", ranking: "Not Ranked", language: "English-taught courses are available, but a base in German is very helpful.", courses: "Building Design, Interior Architecture, Digital Design.", cityInfo: "Koblenz is a picturesque city at the confluence of the Rhine and Moselle rivers. It's known for its historic fortresses, castles, and its location in a famous wine region." },
+                { id: 402, name: "Technische Hochschule Mittelhessen", country: "Germany", city: "Giessen", lat: 50.58, lon: 8.67, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -1 to 4°C", cost: "€750-900/month", website: "https://www.thm.de/site/en/", ranking: "Not Ranked", language: "Some architecture courses are available in English. German B1 is often required.", courses: "Sustainable Building, Construction Management, Architectural Design.", cityInfo: "Giessen is a vibrant university town in the state of Hesse. It has a high student population, making for a lively atmosphere, and is known for its botanical garden, one of the oldest in Germany." },
+                { id: 403, name: "Universita degli Studi di Ferrara", country: "Italy", city: "Ferrara", lat: 44.83, lon: 11.63, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 0-6°C", cost: "€700-850/month", website: "https://www.unife.it/it/en", ranking: "951-1000", language: "Excellent architecture faculty with a good number of courses in English.", courses: "Architectural History, Urban Design, Restoration.", cityInfo: "Ferrara is a beautiful Renaissance city in Northern Italy, surrounded by medieval walls. It's a cyclist's paradise, known for its excellent food and high quality of life." },
+                { id: 404, name: "Politechnika Krakowska", country: "Poland", city: "Krakow", lat: 50.07, lon: 19.94, weather: "🌷 Spring: 3-13°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.pk.edu.pl/index.php?lang=en", ranking: "1201-1400", language: "Strong Faculty of Architecture with many courses and workshops in English.", courses: "Architectural and Urban Design, History of Architecture, Drawing and Painting.", cityInfo: "Krakow is a historic gem, known for its stunning Main Market Square and Wawel Castle. It's a vibrant student city with a lively nightlife and affordable living costs." },
+                { id: 405, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Excellent selection of architecture courses in English.", courses: "Urban and Regional Planning, Architectural Design, History of Art and Architecture.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 406, name: "Technical University of Kosice", country: "Slovakia", city: "Kosice", lat: 48.73, lon: 21.25, weather: "🌷 Spring: 6-16°C, ❄️ Winter: -5 to 1°C", cost: "€500-700/month", website: "https://www.tuke.sk/wps/portal/tuke/home?lang=en", ranking: "1201-1400", language: "Faculty of Arts offers Architecture and Design courses in English.", courses: "Studio of Interior Design, Studio of Architecture, Visual Arts.", cityInfo: "Košice is the largest city in eastern Slovakia and was a European Capital of Culture. It has a beautiful historical center with a stunning cathedral and a vibrant arts scene." },
+                { id: 407, name: "Universita degli Studi di Napoli Federico II", country: "Italy", city: "Naples", lat: 40.85, lon: 14.25, weather: "🌷 Spring: 11-20°C, ❄️ Winter: 5-13°C", cost: "€700-950/month", website: "http://www.international.unina.it/", ranking: "392", language: "World-class architecture school with a great selection of courses in English.", courses: "Architectural Design, Urbanism, History of Architecture.", cityInfo: "Naples is one of Italy's oldest, most artistic, and delicious cities. Live amidst vibrant street life, incredible history (Pompeii is nearby), and the birthplace of pizza." },
+                { id: 408, name: "Vilnius Gediminas Technical University", country: "Lithuania", city: "Vilnius", lat: 54.72, lon: 25.33, weather: "🌷 Spring: 3-12°C, ❄️ Winter: -6 to -1°C", cost: "€500-700/month", website: "https://vilniustech.lt/en/", ranking: "801-850", language: "Very strong architecture program fully taught in English.", courses: "Architectural Design, Urban Complexes, Building Structures.", cityInfo: "Vilnius, the capital of Lithuania, is known for its baroque architecture, especially in its medieval Old Town. It's a green city with a vibrant arts scene and a growing tech sector." },
+                { id: 409, name: "Bialystok University of Technology", country: "Poland", city: "Bialystok", lat: 53.12, lon: 23.15, weather: "🌷 Spring: 2-12°C, ❄️ Winter: -6 to 0°C", cost: "€350-500/month", website: "https://pb.edu.pl/en/", ranking: "1201-1400", language: "Faculty of Architecture offers a good selection of courses in English.", courses: "Architectural Design, Urban Planning, History of Polish Architecture.", cityInfo: "Bialystok is a major city in northeastern Poland, known for its beautiful Branicki Palace and proximity to the Białowieża Forest, a UNESCO World Heritage site." },
+                { id: 410, name: "National Technical University of Athens", country: "Greece", city: "Athens", lat: 37.98, lon: 23.78, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€750-950/month", website: "https://www.ntua.gr/en/", ranking: "347", language: "Excellent School of Architecture with courses available in English for exchange students.", courses: "Architectural Design, Urban and Regional Planning, History and Theory of Architecture.", cityInfo: "As a student in Athens, you'll live in a city where ancient history meets modern life. Enjoy vibrant street life, delicious food, and sunny weather year-round." },
+                { id: 411, name: "Czech University of Life Sciences Prague", country: "Czech Republic", city: "Prague", lat: 50.13, lon: 14.37, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 2°C", cost: "€600-900/month", website: "https://www.czu.cz/en/", ranking: "721-730", language: "While not a primary architecture school, landscape architecture courses are strong and taught in English.", courses: "Landscape Architecture, Garden Design, Land Management.", cityInfo: "Prague is one of Europe's most beautiful cities, famous for its Old Town Square, Charles Bridge, and Prague Castle. It's a magical city with a rich history and a very affordable student life." },
+                { id: 412, name: "Budapest University of Technology and Economics", country: "Hungary", city: "Budapest", lat: 47.48, lon: 19.05, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -2 to 4°C", cost: "€550-800/month", website: "https://www.bme.hu/?language=en", ranking: "741-750", language: "Very strong Faculty of Architecture with a full program in English.", courses: "Architectural Design, Urban Design, Building Construction.", cityInfo: "Budapest, Hungary's capital on the Danube River, is a stunning city known for its grand architecture, historic thermal baths, and vibrant nightlife. It's a very student-friendly and affordable city." },
+                { id: 413, name: "Politechnika Slaska", country: "Poland", city: "Gliwice", lat: 50.29, lon: 18.67, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 2°C", cost: "€450-650/month", website: "https://www.polsl.pl/en/", ranking: "1201-1400", language: "Excellent selection of architecture courses taught in English.", courses: "Architecture and Urbanism, Theory of Architecture, Digital Tools in Design.", cityInfo: "Gliwice is a city in the Silesia region of southern Poland, part of a large urban conurbation. It's an important industrial and academic center with a charming old town and market square." }
+            ],
+            "Architectural Restoration": [
+                { id: 300, name: "Brandenburg University of Technology", country: "Germany", city: "Cottbus", lat: 51.76, lon: 14.33, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 3°C", cost: "€700-900/month", website: "https://www.b-tu.de/en/", ranking: "Not Ranked", language: "Excellent English programs in heritage studies. German B1 may be required for some courses.", courses: "Building Archaeology, Conservation Science, Heritage Management.", cityInfo: "Cottbus is a university city in Brandenburg, known for its unique Sorbian culture, beautiful parks like Branitzer Park, and its transformation from a post-industrial city to a green hub." },
+                { id: 301, name: "Universita degli Studi di Napoli Federico II", country: "Italy", city: "Naples", lat: 40.85, lon: 14.25, weather: "🌷 Spring: 11-20°C, ❄️ Winter: 5-13°C", cost: "€700-950/month", website: "http://www.international.unina.it/", ranking: "392", language: "Good selection of architecture and restoration courses in English.", courses: "Architectural Restoration Theory, Conservation Techniques, Structural Consolidation.", cityInfo: "Naples is one of Italy's oldest, most artistic, and delicious cities. Live amidst vibrant street life, incredible history (Pompeii is nearby), and the birthplace of pizza." },
+                { id: 302, name: "Uppsala Universitet", country: "Sweden", city: "Uppsala", lat: 59.85, lon: 17.63, weather: "🌷 Spring: 1-10°C, ❄️ Winter: -5 to 0°C", cost: "€900-1200/month", website: "https://www.uu.se/en", ranking: "105", language: "Excellent English programs, especially in humanities and heritage.", courses: "Cultural Heritage, Landscape Studies, Conservation.", cityInfo: "Uppsala is Sweden's fourth-largest city and a historic university town. It's known for its stunning cathedral, prestigious university, and vibrant student life centered around 'student nations'." },
+                { id: 303, name: "Göteborgs Universitet", country: "Sweden", city: "Gothenburg", lat: 57.70, lon: 11.97, weather: "🌷 Spring: 3-12°C, ❄️ Winter: -2 to 2°C", cost: "€950-1300/month", website: "https://www.gu.se/en", ranking: "187", language: "Strong English programs in cultural sciences and conservation.", courses: "Conservation, Craft Laboratory, Cultural Heritage Studies.", cityInfo: "Gothenburg is Sweden's second-largest city, a friendly and relaxed port known for its canals, neoclassical architecture, and lively cultural scene. It has a strong focus on sustainability and design." }
+            ],
+            "City and Regional Planning": [
+                { id: 500, name: "Czech University of Life Sciences Prague", country: "Czech Republic", city: "Prague", lat: 50.13, lon: 14.37, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 2°C", cost: "€600-900/month", website: "https://www.czu.cz/en/", ranking: "721-730", language: "Strong English programs in environmental and landscape planning.", courses: "Urban Planning, Landscape Planning, Regional Development.", cityInfo: "Prague is one of Europe's most beautiful cities, famous for its Old Town Square, Charles Bridge, and Prague Castle. It's a magical city with a rich history and a very affordable student life." },
+                { id: 501, name: "Brandenburg University of Technology", country: "Germany", city: "Cottbus", lat: 51.76, lon: 14.33, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 3°C", cost: "€700-900/month", website: "https://www.b-tu.de/en/", ranking: "Not Ranked", language: "Excellent English programs in Urban Design and Heritage Studies.", courses: "Urban Design, Regional Planning, Heritage Management.", cityInfo: "Cottbus is a university city in Brandenburg, known for its unique Sorbian culture, beautiful parks like Branitzer Park, and its transformation from a post-industrial city to a green hub." },
+                { id: 502, name: "Frankfurt University of Applied Sciences", country: "Germany", city: "Frankfurt", lat: 50.12, lon: 8.68, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 0-5°C", cost: "€900-1200/month", website: "https://www.frankfurt-university.de/en/", ranking: "Not Ranked", language: "Good selection of English courses in related fields. German is beneficial.", courses: "Urban Planning, Transport Systems, Geoinformatics.", cityInfo: "Frankfurt is Germany's financial capital, known for its futuristic skyline. It's a major international hub with a diverse population, excellent museums, and a lively city center." },
+                { id: 503, name: "University of Thessaly", country: "Greece", city: "Volos", lat: 39.36, lon: 22.94, weather: "🌷 Spring: 11-20°C, ❄️ Winter: 5-13°C", cost: "€600-800/month", website: "https://www.uth.gr/en", ranking: "1001-1200", language: "Good English course availability in the Department of Planning and Regional Development.", courses: "Urban Analysis, Regional Development, Environmental Planning.", cityInfo: "The department is in Volos, a beautiful coastal port city in central Greece, situated halfway between Athens and Thessaloniki. It's known for its lively waterfront and as the gateway to the stunning Pelion peninsula." },
+                { id: 504, name: "Universiteit van Amsterdam", country: "Netherlands", city: "Amsterdam", lat: 52.36, lon: 4.90, weather: "🌷 Spring: 6-14°C, ❄️ Winter: 1-6°C", cost: "€1100-1500/month", website: "https://www.uva.nl/en", ranking: "53", language: "World-class social sciences faculty with full English programs in Urban and Regional Planning.", courses: "Urban and Regional Planning, Urban Geography, Environmental Planning.", cityInfo: "Amsterdam is the vibrant capital of the Netherlands, famous for its artistic heritage, elaborate canal system, and narrow houses with gabled facades. It's a very international and bike-friendly city." },
+                { id: 505, name: "Jagiellonian University in Krakow", country: "Poland", city: "Krakow", lat: 50.06, lon: 19.93, weather: "🌷 Spring: 3-13°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://en.uj.edu.pl/", ranking: "312", language: "Excellent English programs in social sciences and geography related to planning.", courses: "Urban Geography, Regional Studies, Social Development.", cityInfo: "Krakow is a historic gem, known for its stunning Main Market Square and Wawel Castle. It's a vibrant student city with a lively nightlife and affordable living costs." },
+                { id: 506, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Excellent selection of technical and planning courses in English.", courses: "Urban and Regional Planning, Transportation Systems, Urban Design.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 507, name: "Wroclaw University of Science and Technology", country: "Poland", city: "Wroclaw", lat: 51.11, lon: 17.06, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 3°C", cost: "€450-650/month", website: "https://pwr.edu.pl/en/", ranking: "901-950", language: "Very good selection of English-taught courses in the Faculty of Architecture.", courses: "Urban Planning, Spatial Planning, Urban Design.", cityInfo: "Wrocław is a vibrant city in western Poland, known for its beautiful Market Square lined with colorful townhouses, numerous bridges, and lively student population." }
+            ],
+            "Industrial Design": [
+                { id: 600, name: "Escola Superior De Artes E Design (ESAD)", country: "Portugal", city: "Porto (Matosinhos)", lat: 41.18, lon: -8.68, weather: "🌷 Spring: 10-18°C, ❄️ Winter: 6-14°C", cost: "€700-950/month", website: "https://www.esad.pt/en/", ranking: "Not Ranked", language: "Good English programs, especially for design. Portuguese is a plus.", courses: "Product Design, Interior Design, Communication Design.", cityInfo: "Located in Matosinhos, a major port and beach city next to Porto. Enjoy the vibrant culture, historic center of Porto, and amazing food scene." },
+                { id: 601, name: "University of Bologna", country: "Italy", city: "Bologna", lat: 44.49, lon: 11.34, weather: "🌷 Spring: 8-18°C, ❄️ Winter: 0-6°C", cost: "€800-1100/month", website: "https://www.unibo.it/en", ranking: "132", language: "Excellent selection of courses in English, especially in design and engineering.", courses: "Industrial Design, Product Design, Design Thinking.", cityInfo: "Home to the oldest university in the Western world, Bologna is a historic city with a lively student atmosphere. It's famous for its porticoes and rich culinary traditions." },
+                { id: 602, name: "Technical University of Varna", country: "Bulgaria", city: "Varna", lat: 43.22, lon: 27.94, weather: "🌷 Spring: 7-16°C, ❄️ Winter: 0-6°C", cost: "€400-550/month", website: "https://www.tu-varna.bg/tu-varna/index.php/en/", ranking: "Not Ranked", language: "Offers an Industrial Design program, with some courses in English.", courses: "Industrial Design, Graphic Design, Engineering Design.", cityInfo: "Varna is Bulgaria's 'sea capital,' a major tourist destination on the Black Sea coast. Enjoy beautiful beaches, a large seaside park, and a lively atmosphere in the summer." },
+                { id: 603, name: "University of West Attica", country: "Greece", city: "Athens", lat: 38.00, lon: 23.67, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€700-900/month", website: "https://www.uniwa.gr/en/", ranking: "Not Ranked", language: "Faculty of Applied Arts and Culture offers design courses, some in English.", courses: "Graphic Design, Interior Decoration, Product Design.", cityInfo: "Athens is the historic capital of Europe. Immerse yourself in thousands of years of history at the Acropolis, enjoy the Mediterranean climate, and experience a bustling modern city." },
+                { id: 604, name: "Universita degli Studi di Ferrara", country: "Italy", city: "Ferrara", lat: 44.83, lon: 11.63, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 0-6°C", cost: "€700-850/month", website: "https://www.unife.it/it/en", ranking: "951-1000", language: "Offers a strong design program with courses available in English.", courses: "Product Design, Communication Design, Eco-design.", cityInfo: "Ferrara is a beautiful Renaissance city in Northern Italy, surrounded by medieval walls. It's a cyclist's paradise, known for its excellent food and high quality of life." },
+                { id: 605, name: "Jönköping University", country: "Sweden", city: "Jönköping", lat: 57.78, lon: 14.16, weather: "🌷 Spring: 2-11°C, ❄️ Winter: -4 to 1°C", cost: "€850-1100/month", website: "https://ju.se/en.html", ranking: "Not Ranked", language: "Full programs in English, strong focus on industrial design and engineering.", courses: "Industrial Design, Product Development, Ergonomics.", cityInfo: "Jönköping is a beautiful city in southern Sweden, situated on the shores of Lake Vättern. It's known for its entrepreneurial spirit and high quality of life." },
+                { id: 606, name: "Kassel University", country: "Germany", city: "Kassel", lat: 51.31, lon: 9.49, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -1 to 4°C", cost: "€750-950/month", website: "https://www.uni-kassel.de/uni/en/", ranking: "Not Ranked", language: "Famous for its School of Art and Design (Kunsthochschule). English courses available, but German is a major asset.", courses: "Product Design, Visual Communication, New Media.", cityInfo: "Kassel is a city in central Germany, famous for the documenta art exhibition. It has beautiful parks, including the UNESCO World Heritage site Bergpark Wilhelmshöhe." },
+                { id: 607, name: "Estonian Academy of Arts", country: "Estonia", city: "Tallinn", lat: 59.43, lon: 24.75, weather: "🌷 Spring: 1-9°C, ❄️ Winter: -5 to 0°C", cost: "€700-900/month", website: "https://www.artun.ee/en/home/", ranking: "Top 200 (QS Art & Design)", language: "Excellent design programs fully taught in English.", courses: "Product Design, Interaction Design, Graphic Design.", cityInfo: "Located in Tallinn, which blends a stunningly preserved medieval Old Town with a modern, tech-savvy culture. A vibrant and forward-thinking capital." },
+                { id: 608, name: "Instituto Politecnico da Guarda", country: "Portugal", city: "Guarda", lat: 40.53, lon: -7.26, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 2-8°C", cost: "€450-600/month", website: "https://www.ipg.pt/", ranking: "Not Ranked", language: "Some courses in English, but Portuguese is highly recommended.", courses: "Design, Marketing, Communication.", cityInfo: "Guarda is the highest city in Portugal, known for its fresh air and historic stone architecture. It offers a very affordable cost of living and a gateway to the Serra da Estrela mountains." }
+            ],
+            "Bioengineering": [
+                { id: 700, name: "ESIEE Paris, Université Gustave Eiffel", country: "France", city: "Paris (Noisy-le-Grand)", lat: 48.84, lon: 2.58, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 2-7°C", cost: "€1100-1500/month", website: "https://www.esiee.fr/en", ranking: "501-550 (Université Gustave Eiffel)", language: "Strong selection of Health/Bio-tech courses in English.", courses: "Biomedical Devices, Health Technologies, Bio-MEMS.", cityInfo: "The campus is in a modern suburb with direct RER train access to the heart of Paris, allowing you to enjoy the world-famous culture, museums, and landmarks of the French capital." },
+                { id: 701, name: "University of Pitesti", country: "Romania", city: "Pitesti", lat: 44.85, lon: 24.87, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€350-500/month", website: "https://www.upit.ro/en/", ranking: "Not Ranked", language: "Courses in English are available for exchange students.", courses: "Biotechnical Systems, Medical Engineering, Environmental Science.", cityInfo: "Pitesti is an important commercial and industrial center in Romania, known as the 'city of tulips.' It offers a very low cost of living and is close to the beautiful Carpathian Mountains." },
+                { id: 702, name: "Hochschule Ruhr West", country: "Germany", city: "Mülheim an der Ruhr", lat: 51.43, lon: 6.88, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 1-6°C", cost: "€800-1000/month", website: "https://www.hochschule-ruhr-west.de/en/", ranking: "Not Ranked", language: "Applied sciences university with some English-taught modules. German B1 is beneficial.", courses: "Biomedical Engineering, Medical Computer Science, Health Technology.", cityInfo: "Located in the large Ruhr metropolitan area, Mülheim is known for its green spaces along the Ruhr river and its history as a center for industry." }
+            ],
+            "Chemical Engineering": [
+                { id: 800, name: "University of Split", country: "Croatia", city: "Split", lat: 43.51, lon: 16.47, weather: "🌷 Spring: 10-18°C, ❄️ Winter: 5-11°C", cost: "€650-850/month", website: "https://www.unist.hr/en/", ranking: "1201-1400", language: "Faculty of Chemistry and Technology offers courses in English.", courses: "Chemical Engineering, Thermodynamics, Process Engineering.", cityInfo: "Split is a stunning coastal city on the Adriatic Sea, built around the Roman palace of Diocletian. It offers a perfect mix of history, beach life, and access to beautiful islands." },
+                { id: 801, name: "University of Technology and Life Sciences in Bydgoszcz", country: "Poland", city: "Bydgoszcz", lat: 53.12, lon: 18.00, weather: "🌷 Spring: 4-14°C, ❄️ Winter: -4 to 1°C", cost: "€400-600/month", website: "https://pbs.edu.pl/en", ranking: "Not Ranked", language: "Faculty of Chemical Technology and Engineering has English-taught options.", courses: "Chemical Technology, Process Engineering, Polymer Science.", cityInfo: "Bydgoszcz is a charming city in northern Poland, known for its picturesque riverfront, historic granaries, and lively cultural scene. It's often called 'Little Venice'." },
+                { id: 802, name: "University of Chemistry and Technology, Prague", country: "Czech Republic", city: "Prague", lat: 50.09, lon: 14.41, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 2°C", cost: "€600-900/month", website: "https://www.vscht.cz/english/", ranking: "556", language: "A specialized university with excellent and comprehensive Chemical Engineering programs in English.", courses: "Reaction Engineering, Thermodynamics, Process Control, Biotechnology.", cityInfo: "Prague is one of Europe's most beautiful cities, famous for its Old Town Square, Charles Bridge, and Prague Castle. It's a magical city with a rich history and a very affordable student life." },
+                { id: 803, name: "Slovak University of Technology in Bratislava", country: "Slovakia", city: "Bratislava", lat: 48.15, lon: 17.11, weather: "🌷 Spring: 6-17°C, ❄️ Winter: -2 to 3°C", cost: "€600-850/month", website: "https://www.stuba.sk/english.html?page_id=1", ranking: "801-850", language: "Faculty of Chemical and Food Technology has a strong reputation and offers courses in English.", courses: "Chemical Engineering, Process Control, Polymer Engineering.", cityInfo: "Bratislava, the capital of Slovakia, sits on the Danube River bordering Austria and Hungary. It's a charming city with a beautiful old town, a commanding castle, and a relaxed atmosphere." },
+                { id: 804, name: "University of Ljubljana", country: "Slovenia", city: "Ljubljana", lat: 46.05, lon: 14.50, weather: "🌷 Spring: 6-17°C, ❄️ Winter: -2 to 4°C", cost: "€700-950/month", website: "https://www.uni-lj.si/eng/", ranking: "621-630", language: "Excellent English programs at the Faculty of Chemistry and Chemical Technology.", courses: "Chemical Process Engineering, Thermodynamics, Materials Science.", cityInfo: "Ljubljana is Slovenia's vibrant and green capital. The city is known for its beautiful riverbanks lined with cafes, a medieval castle on a hill, and a very relaxed, pedestrian-friendly center." },
+                { id: 805, name: "Beuth University of Applied Sciences Berlin", country: "Germany", city: "Berlin", lat: 52.54, lon: 13.35, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 4°C", cost: "€900-1200/month", website: "https://www.bht-berlin.de/en/", ranking: "Not Ranked", language: "Offers Process Engineering courses, some in English. B1 German certificate may be required.", courses: "Process Engineering, Plant Design, Environmental Technology.", cityInfo: "Berlin is Germany's vibrant, multicultural capital. It's a global center for art, architecture, and history, offering an unparalleled student experience with a relatively low cost of living for a major capital." },
+                { id: 806, name: "Politechnika Krakowska", country: "Poland", city: "Krakow", lat: 50.07, lon: 19.94, weather: "🌷 Spring: 3-13°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.pk.edu.pl/index.php?lang=en", ranking: "1201-1400", language: "Faculty of Chemical Engineering and Technology offers a wide range of courses in English.", courses: "Chemical Technology, Process Engineering, Catalysis.", cityInfo: "Krakow is a historic gem, known for its stunning Main Market Square and Wawel Castle. It's a vibrant student city with a lively nightlife and affordable living costs." },
+                { id: 807, name: "Universite de Mons", country: "Belgium", city: "Mons", lat: 50.45, lon: 3.95, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 1-6°C", cost: "€850-1100/month", website: "https://web.umons.ac.be/en/", ranking: "641-650", language: "Some courses in English, but a good level of French is highly recommended.", courses: "Process Chemistry, Materials Science, Polymer Chemistry.", cityInfo: "Mons was a European Capital of Culture and is known for its beautiful Belfry (a UNESCO site) and the historic Grand-Place. It's a charming city in the French-speaking region of Belgium." },
+                { id: 808, name: "Poznan University of Technology", country: "Poland", city: "Poznan", lat: 52.40, lon: 16.93, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 2°C", cost: "€500-700/month", website: "https://www.put.poznan.pl/en", ranking: "1001-1200", language: "Offers a full Chemical Technology program in English.", courses: "Chemical Engineering, Process Design, Polymer Technology.", cityInfo: "Poznań is a historic and vibrant city in western Poland, known for its beautiful old market square with colorful merchant houses and a lively student atmosphere." },
+                { id: 809, name: "Universita della Calabria", country: "Italy", city: "Cosenza", lat: 39.36, lon: 16.23, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 5-12°C", cost: "€600-750/month", website: "https://www.unical.it/en/", ranking: "901-950", language: "Good selection of Chemical Engineering courses offered in English.", courses: "Transport Phenomena, Thermodynamics, Chemical Plant Design.", cityInfo: "Located in Southern Italy, Cosenza has a beautiful old town and a modern city center. The university campus is one of the largest in Italy, creating a vibrant student community." }
+            ],    
+            "Civil Engineering": [
+                { id: 900, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Excellent selection of Civil Engineering courses in English.", courses: "Structural Mechanics, Geotechnics, Transportation Engineering.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 901, name: "Politechnika Lubelska", country: "Poland", city: "Lublin", lat: 51.23, lon: 22.54, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -5 to 0°C", cost: "€400-600/month", website: "https://en.pollub.pl/", ranking: "1201-1400", language: "Faculty of Civil Engineering and Architecture offers a good range of courses in English.", courses: "Structural Design, Building Materials, Geotechnical Engineering.", cityInfo: "Lublin is a major academic and cultural hub in eastern Poland, known for its well-preserved Old Town, castle, and lively arts scene." },
+                { id: 902, name: "Politechnika Slaska", country: "Poland", city: "Gliwice", lat: 50.29, lon: 18.67, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 2°C", cost: "€450-650/month", website: "https://www.polsl.pl/en/", ranking: "1201-1400", language: "Strong Civil Engineering faculty with a full program available in English.", courses: "Structural Engineering, Building Technology, Transportation Systems.", cityInfo: "Gliwice is a city in the Silesia region of southern Poland, part of a large urban conurbation. It's an important industrial and academic center with a charming old town and market square." },
+                { id: 903, name: "Wroclaw University of Science and Technology", country: "Poland", city: "Wroclaw", lat: 51.11, lon: 17.06, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 3°C", cost: "€450-650/month", website: "https://pwr.edu.pl/en/", ranking: "901-950", language: "Excellent and comprehensive Civil Engineering program taught in English.", courses: "Structural Analysis, Concrete Structures, Bridge Engineering.", cityInfo: "Wrocław is a vibrant city in western Poland, known for its beautiful Market Square lined with colorful townhouses, numerous bridges, and lively student population." },
+                { id: 904, name: "Bialystok University of Technology", country: "Poland", city: "Bialystok", lat: 53.12, lon: 23.15, weather: "🌷 Spring: 2-12°C, ❄️ Winter: -6 to 0°C", cost: "€350-500/month", website: "https://pb.edu.pl/en/", ranking: "1201-1400", language: "Faculty of Civil Engineering and Environmental Sciences offers courses in English.", courses: "Structural Mechanics, Road Engineering, Water Supply Systems.", cityInfo: "Bialystok is a major city in northeastern Poland, known for its beautiful Branicki Palace and proximity to the Białowieża Forest, a UNESCO World Heritage site." },
+                { id: 905, name: "Jönköping University", country: "Sweden", city: "Jönköping", lat: 57.78, lon: 14.16, weather: "🌷 Spring: 2-11°C, ❄️ Winter: -4 to 1°C", cost: "€850-1100/month", website: "https://ju.se/en.html", ranking: "Not Ranked", language: "School of Engineering has strong focus on Sustainable Building, taught in English.", courses: "Sustainable Building Design, Construction Technology, Building Information Modeling (BIM).", cityInfo: "Jönköping is a beautiful city in southern Sweden, situated on the shores of Lake Vättern. It's known for its entrepreneurial spirit and high quality of life." },
+                { id: 906, name: "Slovak University of Technology in Bratislava", country: "Slovakia", city: "Bratislava", lat: 48.15, lon: 17.11, weather: "🌷 Spring: 6-17°C, ❄️ Winter: -2 to 3°C", cost: "€600-850/month", website: "https://www.stuba.sk/english.html?page_id=1", ranking: "801-850", language: "Faculty of Civil Engineering has a strong reputation and offers a wide range of courses in English.", courses: "Structural Engineering, Water Management, Geotechnics.", cityInfo: "Bratislava, the capital of Slovakia, sits on the Danube River bordering Austria and Hungary. It's a charming city with a beautiful old town, a commanding castle, and a relaxed atmosphere." },
+                { id: 907, name: "Warsaw University of Life Sciences (SGGW)", country: "Poland", city: "Warsaw", lat: 52.16, lon: 21.04, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 1°C", cost: "€600-850/month", website: "https://www.sggw.pl/en/", ranking: "1201-1400", language: "Focus on Environmental Engineering, with relevant courses for Civil Engineering students taught in English.", courses: "Hydraulic Engineering, Environmental Management, Water Resources.", cityInfo: "Warsaw is the bustling capital of Poland, a city completely rebuilt after WWII. It offers a unique blend of history and modernity, with excellent museums, green spaces, and a vibrant culture." },
+                { id: 908, name: "Gheorghe Asachi Technical University of Iasi", country: "Romania", city: "Iasi", lat: 47.16, lon: 27.58, weather: "🌷 Spring: 6-17°C, ❄️ Winter: -5 to 1°C", cost: "€400-550/month", website: "https://www.tuiasi.ro/en/", ranking: "1201-1400", language: "Full Civil Engineering program taught in English with a wide variety of courses.", courses: "Structural Analysis, Reinforced Concrete, Transportation Infrastructure.", cityInfo: "Iasi is a historic city in northeastern Romania, known as the country's cultural capital, with a rich academic tradition and a lively student atmosphere." },
+                { id: 909, name: "University of Technology of Tarbes Occitanie Pyrénées (ENIT)", country: "France", city: "Tarbes", lat: 43.23, lon: 0.07, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 2-10°C", cost: "€750-950/month", website: "https://www.enit.fr/en/index.html", ranking: "Not Ranked", language: "A specialized engineering school with project-based learning. English options are good.", courses: "Mechanical and Industrial Engineering, Materials Science, Structural Systems.", cityInfo: "Tarbes is a city in southwestern France at the foot of the Pyrénées mountains, offering stunning natural scenery and easy access to outdoor activities like hiking and skiing." },
+                { id: 910, name: "Josip Juraj Strossmayer University of Osijek", country: "Croatia", city: "Osijek", lat: 45.55, lon: 18.69, weather: "🌷 Spring: 8-19°C, ❄️ Winter: -2 to 4°C", cost: "€500-700/month", website: "https://www.unios.hr/en/", ranking: "Not Ranked", language: "The Faculty of Civil Engineering offers a full study program in English.", courses: "Structural Engineering, Geotechnics, Water Management.", cityInfo: "Osijek is the largest city in eastern Croatia, located on the Drava river. It's known for its beautiful baroque architecture, green parks, and a relaxed, welcoming atmosphere." }
+            ],
+            "Computer Engineering": [
+                { id: 1000, name: "Eötvös Loránd University", country: "Hungary", city: "Budapest", lat: 47.49, lon: 19.06, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -2 to 4°C", cost: "€550-800/month", website: "https://www.elte.hu/en/", ranking: "701-710", language: "Faculty of Informatics has a full and very strong program in English.", courses: "Algorithms and Data Structures, Artificial Intelligence, Software Engineering.", cityInfo: "Budapest, Hungary's capital on the Danube River, is a stunning city known for its grand architecture, historic thermal baths, and vibrant nightlife. It's a very student-friendly and affordable city." },
+                { id: 1001, name: "Tomas Bata University", country: "Czech Republic", city: "Zlín", lat: 49.22, lon: 17.66, weather: "🌷 Spring: 6-16°C, ❄️ Winter: -3 to 2°C", cost: "€500-700/month", website: "https://www.utb.cz/en/", ranking: "1001-1200", language: "Faculty of Applied Informatics offers a wide range of courses in English.", courses: "Cybernetics, Software Engineering, Automatic Control.", cityInfo: "Zlín is a unique city in the southeast of Moravia, famous for its functionalist architecture from the Bata shoe company era. It's a green, modern, and very affordable city." },
+                { id: 1002, name: "Ruprecht-Karls-Universitat Heidelberg", country: "Germany", city: "Heidelberg", lat: 49.41, lon: 8.71, weather: "🌷 Spring: 6-17°C, ❄️ Winter: 0-5°C", cost: "€900-1100/month", website: "https://www.uni-heidelberg.de/en", ranking: "87", language: "A top-ranked university. Excellent English courses at the graduate level; German is essential for undergraduate.", courses: "Scientific Computing, Data Analysis, Theoretical Computer Science.", cityInfo: "Heidelberg is a picturesque city known for its romantic castle ruins, historic university, and beautiful old town on the Neckar River. It's a major hub for science and research." },
+                { id: 1003, name: "Technische Hochschule Mittelhessen", country: "Germany", city: "Giessen", lat: 50.58, lon: 8.67, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -1 to 4°C", cost: "€750-900/month", website: "https://www.thm.de/site/en/", ranking: "Not Ranked", language: "Applied sciences university with some Computer Science modules in English. German B1 is beneficial.", courses: "Software Engineering, Network Technology, Database Systems.", cityInfo: "Giessen is a vibrant university town in the state of Hesse. It has a high student population, making for a lively atmosphere, and is known for its botanical garden, one of the oldest in Germany." },
+                { id: 1004, name: "Bialystok University of Technology", country: "Poland", city: "Bialystok", lat: 53.12, lon: 23.15, weather: "🌷 Spring: 2-12°C, ❄️ Winter: -6 to 0°C", cost: "€350-500/month", website: "https://pb.edu.pl/en/", ranking: "1201-1400", language: "Faculty of Computer Science offers a full program in English.", courses: "Computer Networks, Artificial Intelligence, Database Systems.", cityInfo: "Bialystok is a major city in northeastern Poland, known for its beautiful Branicki Palace and proximity to the Białowieża Forest, a UNESCO World Heritage site." },
+                { id: 1005, name: "University of Primorska", country: "Slovenia", city: "Koper", lat: 45.54, lon: 13.73, weather: "🌷 Spring: 9-18°C, ❄️ Winter: 3-8°C", cost: "€600-800/month", website: "https://www.upr.si/en/", ranking: "Not Ranked", language: "Faculty of Mathematics, Natural Sciences and IT offers courses in English.", courses: "Data Science, Cryptography, Computer Graphics.", cityInfo: "Koper is a charming coastal city in Slovenia on the Adriatic Sea. It features a well-preserved medieval old town with Venetian influences and offers a relaxed Mediterranean lifestyle." },
+                { id: 1006, name: "Universitat Bonn", country: "Germany", city: "Bonn", lat: 50.73, lon: 7.10, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 1-6°C", cost: "€900-1100/month", website: "https://www.uni-bonn.de/en/", ranking: "227", language: "A leading university for research. Excellent English courses at the graduate level. German is necessary for undergraduate.", courses: "Machine Learning, Computer Graphics, Algorithms.", cityInfo: "Bonn is a beautiful, relaxed city on the Rhine River and the former capital of West Germany. It's the birthplace of Beethoven and is known for its museums, cherry blossoms, and international atmosphere." },
+                { id: 1007, name: "New Bulgarian University", country: "Bulgaria", city: "Sofia", lat: 42.66, lon: 23.27, weather: "🌷 Spring: 6-17°C, ❄️ Winter: -4 to 3°C", cost: "€500-700/month", website: "https://nbu.bg/en", ranking: "Not Ranked", language: "Good selection of Computer Science programs taught fully in English.", courses: "Software Engineering, Network Technologies, Artificial Intelligence.", cityInfo: "Sofia is the capital of Bulgaria, a modern and youthful city with a rich history. It offers a vibrant arts scene, beautiful parks, and a very low cost of living, with Vitosha Mountain right on its doorstep." },
+                { id: 1008, name: "Bucharest University of Economic Studies", country: "Romania", city: "Bucharest", lat: 44.44, lon: 26.10, weather: "🌷 Spring: 7-19°C, ❄️ Winter: -4 to 2°C", cost: "€450-650/month", website: "https://www.ase.ro/index_en.asp", ranking: "1001-1200", language: "Focus on Economic Informatics (Cybernetics), with full programs in English.", courses: "Database Management, Business Information Systems, Data Mining.", cityInfo: "Bucharest, the capital of Romania, is known for its wide boulevards and Belle Époque buildings. It's a bustling city with a vibrant energy, lively nightlife, and very affordable living costs." },
+                { id: 1009, name: "FH Südwestfalen", country: "Germany", city: "Iserlohn/Hagen", lat: 51.37, lon: 7.5, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 0-5°C", cost: "€750-900/month", website: "https://www.fh-swf.de/en/", ranking: "Not Ranked", language: "Applied sciences university. Some modules in English available. German is beneficial.", courses: "Applied Computer Science, Business Informatics, Network and Media Technology.", cityInfo: "A university of applied sciences spread across several locations in North Rhine-Westphalia, known for its close ties to local industry and practical, hands-on education." },
+                { id: 1010, name: "University of Piraeus", country: "Greece", city: "Piraeus", lat: 37.94, lon: 23.65, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€750-950/month", website: "https://www.unipi.gr/unipi/en/", ranking: "Not Ranked", language: "Department of Informatics offers a good selection of courses in English.", courses: "Computer Networks, Information Systems, Software Engineering.", cityInfo: "Piraeus is a major port city, part of the Athens urban area. It offers a unique maritime atmosphere with easy access to the Greek islands and all the historical and cultural attractions of Athens." },
+                { id: 1011, name: "RPTU Kaiserslautern-Landau", country: "Germany", city: "Kaiserslautern", lat: 49.44, lon: 7.76, weather: "🌷 Spring: 6-16°C, ❄️ Winter: -1 to 4°C", cost: "€800-1000/month", website: "https://rptu.de/en/", ranking: "595", language: "A leading technical university with excellent English programs, especially at the graduate level.", courses: "Artificial Intelligence, Embedded Systems, Machine Learning.", cityInfo: "Kaiserslautern is a center for technology and research, nestled in the beautiful Palatinate Forest. It offers a high quality of life with a large international community and proximity to nature." },
+                { id: 1012, name: "Lucian Blaga University of Sibiu", country: "Romania", city: "Sibiu", lat: 45.79, lon: 24.15, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.ulbsibiu.ro/en/", ranking: "1201-1400", language: "Faculty of Engineering offers a full Computer Science program in English.", courses: "Algorithms, Software Engineering, Database Management.", cityInfo: "Sibiu is a charming city in Transylvania, known for its Germanic architecture and beautifully preserved medieval old town. It was a European Capital of Culture and has a rich cultural life." },
+                { id: 1013, name: "Politechnika Slaska", country: "Poland", city: "Gliwice", lat: 50.29, lon: 18.67, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 2°C", cost: "€450-650/month", website: "https://www.polsl.pl/en/", ranking: "1201-1400", language: "Full Informatics program available in English with various specializations.", courses: "Data Science, Artificial Intelligence, Cybersecurity.", cityInfo: "Gliwice is a city in the Silesia region of southern Poland, part of a large urban conurbation. It's an important industrial and academic center with a charming old town and market square." },
+                { id: 1014, name: "Josip Juraj Strossmayer University of Osijek", country: "Croatia", city: "Osijek", lat: 45.55, lon: 18.69, weather: "🌷 Spring: 8-19°C, ❄️ Winter: -2 to 4°C", cost: "€500-700/month", website: "https://www.unios.hr/en/", ranking: "Not Ranked", language: "Faculty of Electrical Engineering, Computer Science and IT offers programs in English.", courses: "Software Engineering, Computer Networks, Intelligent Systems.", cityInfo: "Osijek is the largest city in eastern Croatia, located on the Drava river. It's known for its beautiful baroque architecture, green parks, and a relaxed, welcoming atmosphere." },
+                { id: 1015, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Excellent and very popular Informatics program taught in English.", courses: "Computer Systems, AI, Network Technologies.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 1016, name: "Technical University of Varna", country: "Bulgaria", city: "Varna", lat: 43.22, lon: 27.94, weather: "🌷 Spring: 7-16°C, ❄️ Winter: 0-6°C", cost: "€400-550/month", website: "https://www.tu-varna.bg/tu-varna/index.php/en/", ranking: "Not Ranked", language: "Faculty of Computing and Automation offers a full program in English.", courses: "Software and Computer Engineering, Information Technology, Automation.", cityInfo: "Varna is Bulgaria's 'sea capital,' a major tourist destination on the Black Sea coast. Enjoy beautiful beaches, a large seaside park, and a lively atmosphere in the summer." }
+            ],
+            "Electrical and Electronics Engineering": [
+                { id: 1100, name: "Universita della Calabria", country: "Italy", city: "Cosenza", lat: 39.36, lon: 16.23, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 5-12°C", cost: "€600-750/month", website: "https://www.unical.it/en/", ranking: "901-950", language: "Good selection of courses in English in the engineering departments.", courses: "Control Systems, Electronics, Telecommunications.", cityInfo: "Located in Southern Italy, Cosenza has a beautiful old town and a modern city center. The university campus is one of the largest in Italy, creating a vibrant student community." },
+                { id: 1101, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Faculty of Electrical and Control Engineering offers a full program in English.", courses: "Control Engineering, Electronics, Power Systems.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 1102, name: "Politechnika Slaska", country: "Poland", city: "Gliwice", lat: 50.29, lon: 18.67, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 2°C", cost: "€450-650/month", website: "https://www.polsl.pl/en/", ranking: "1201-1400", language: "Full programs in Electrical Engineering and Electronics available in English.", courses: "Microelectronics, Telecommunications, Power Engineering.", cityInfo: "Gliwice is a city in the Silesia region of southern Poland, part of a large urban conurbation. It's an important industrial and academic center with a charming old town and market square." },
+                { id: 1103, name: "Wroclaw University of Science and Technology", country: "Poland", city: "Wroclaw", lat: 51.11, lon: 17.06, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 3°C", cost: "€450-650/month", website: "https://pwr.edu.pl/en/", ranking: "901-950", language: "Top-rated faculty with excellent and comprehensive programs in English.", courses: "Electronics, Telecommunications, Control Engineering and Robotics.", cityInfo: "Wrocław is a vibrant city in western Poland, known for its beautiful Market Square lined with colorful townhouses, numerous bridges, and lively student population." },
+                { id: 1104, name: "Bialystok University of Technology", country: "Poland", city: "Bialystok", lat: 53.12, lon: 23.15, weather: "🌷 Spring: 2-12°C, ❄️ Winter: -6 to 0°C", cost: "€350-500/month", website: "https://pb.edu.pl/en/", ranking: "1201-1400", language: "Faculty of Electrical Engineering offers a good selection of courses in English.", courses: "Power Electronics, Control Systems, Electrical Engineering.", cityInfo: "Bialystok is a major city in northeastern Poland, known for its beautiful Branicki Palace and proximity to the Białowieża Forest, a UNESCO World Heritage site." },
+                { id: 1105, name: "Zagreb University of Applied Sciences", country: "Croatia", city: "Zagreb", lat: 45.80, lon: 15.97, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -1 to 5°C", cost: "€600-800/month", website: "https://www.tvz.hr/en/", ranking: "Not Ranked", language: "Good selection of practical, hands-on courses in English.", courses: "Electrical Engineering, Automation, Communication Technologies.", cityInfo: "Zagreb, Croatia's capital, is a charming and lively city with beautiful Austro-Hungarian architecture. Enjoy its numerous cafes, museums, and parks, with a very affordable cost of living." },
+                { id: 1106, name: "Josip Juraj Strossmayer University of Osijek", country: "Croatia", city: "Osijek", lat: 45.55, lon: 18.69, weather: "🌷 Spring: 8-19°C, ❄️ Winter: -2 to 4°C", cost: "€500-700/month", website: "https://www.unios.hr/en/", ranking: "Not Ranked", language: "Faculty of Electrical Engineering, Computer Science and IT offers full programs in English.", courses: "Power Engineering, Communications and Informatics, Automation.", cityInfo: "Osijek is the largest city in eastern Croatia, located on the Drava river. It's known for its beautiful baroque architecture, green parks, and a relaxed, welcoming atmosphere." },
+                { id: 1107, name: "Universite de Mons", country: "Belgium", city: "Mons", lat: 50.45, lon: 3.95, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 1-6°C", cost: "€850-1100/month", website: "https://web.umons.ac.be/en/", ranking: "641-650", language: "Some EEE courses available in English, but a good level of French is highly recommended.", courses: "Electronics, Telecommunications, Signal Processing.", cityInfo: "Mons was a European Capital of Culture and is known for its beautiful Belfry (a UNESCO site) and the historic Grand-Place. It's a charming city in the French-speaking region of Belgium." },
+                { id: 1108, name: "University of West Attica", country: "Greece", city: "Athens", lat: 38.00, lon: 23.67, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€700-900/month", website: "https://www.uniwa.gr/en/", ranking: "Not Ranked", language: "A growing number of courses in Electrical and Electronics Engineering are offered in English.", courses: "Power Systems, Automation, Electronics.", cityInfo: "Athens is the historic capital of Europe. Immerse yourself in thousands of years of history at the Acropolis, enjoy the Mediterranean climate, and experience a bustling modern city." },
+                { id: 1109, name: "University of Oradea", country: "Romania", city: "Oradea", lat: 47.04, lon: 21.93, weather: "🌷 Spring: 8-19°C, ❄️ Winter: -3 to 2°C", cost: "€400-600/month", website: "https://www.uoradea.ro/english/", ranking: "Not Ranked", language: "Faculty of Electrical Engineering and IT offers programs in English.", courses: "Electronics, Telecommunications, Computers.", cityInfo: "Oradea is a beautiful city in western Romania, known for its stunning Art Nouveau and Baroque architecture. It's a vibrant city with a relaxed atmosphere and a growing reputation." },
+                { id: 1110, name: "ESIEE Paris Universite Gustave Eiffel", country: "France", city: "Paris", lat: 48.84, lon: 2.58, weather: "🌷 Spring: 8-18°C, ❄️ Winter: 3-8°C", cost: "€1100-1500/month", website: "https://www.esiee.fr/en", ranking: "Not Ranked", language: "A top engineering school with excellent, full programs in English.", courses: "Embedded Systems, Computer Science, Data Science, Electronics.", cityInfo: "Located in the eastern suburbs of Paris, the campus offers a modern learning environment with easy access to one of the world's most iconic cities. Enjoy world-class museums, cuisine, and culture." },
+                { id: 1111, name: "University of Technology of Tarbes Occitanie Pyrénées (ENIT)", country: "France", city: "Tarbes", lat: 43.23, lon: 0.07, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 2-10°C", cost: "€750-950/month", website: "https://www.enit.fr/en/index.html", ranking: "Not Ranked", language: "A specialized engineering school with project-based learning, relevant for EEE students. Good English options.", courses: "Mechanical Engineering, Industrial Systems, Mechatronics.", cityInfo: "Tarbes is a city in southwestern France at the foot of the Pyrénées mountains, offering stunning natural scenery and easy access to outdoor activities like hiking and skiing." },
+                { id: 1112, name: "Universite de Limoges", country: "France", city: "Limoges", lat: 45.83, lon: 1.26, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 1-7°C", cost: "€700-900/month", website: "https://www.unilim.fr/", ranking: "1201-1400", language: "Strong in electronics and telecommunications. English courses available, but French is beneficial.", courses: "Electronics, Telecommunications, RF & Microwaves.", cityInfo: "Limoges is famous for its medieval and Renaissance enamels, porcelain, and oak barrels. It's a historic city in a beautiful, green region of France." },
+                { id: 1113, name: "Technical University of Varna", country: "Bulgaria", city: "Varna", lat: 43.22, lon: 27.94, weather: "🌷 Spring: 7-16°C, ❄️ Winter: 0-6°C", cost: "€400-550/month", website: "https://www.tu-varna.bg/tu-varna/index.php/en/", ranking: "Not Ranked", language: "Faculty of Electronics and Faculty of Electrical Engineering offer full programs in English.", courses: "Electronics, Telecommunications, Power Engineering.", cityInfo: "Varna is Bulgaria's 'sea capital,' a major tourist destination on the Black Sea coast. Enjoy beautiful beaches, a large seaside park, and a lively atmosphere in the summer." },
+                { id: 1114, name: "Latvia University of Life Sciences and Technologies", country: "Latvia", city: "Jelgava", lat: 56.65, lon: 23.72, weather: "🌷 Spring: 3-12°C, ❄️ Winter: -5 to 0°C", cost: "€500-700/month", website: "https://www.llu.lv/en/", ranking: "Not Ranked", language: "Faculty of Engineering offers relevant courses, some in English.", courses: "Power Engineering, Automation, Computer Control.", cityInfo: "Jelgava is a city in central Latvia, just south of Riga. It's known for the magnificent Jelgava Palace and its reputation as a student city with a friendly atmosphere." },
+                { id: 1115, name: "École d’ingénieurs généralistes La Rochelle", country: "France", city: "La Rochelle", lat: 46.14, lon: -1.15, weather: "🌷 Spring: 8-16°C, ❄️ Winter: 3-9°C", cost: "€800-1000/month", website: "https://eigsi.fr/en/", ranking: "Not Ranked", language: "A general engineering school with specializations. Good English program.", courses: "Energy and Environment, Transport Systems, Industrial Engineering.", cityInfo: "A beautiful historic port city on the Atlantic coast. La Rochelle is known for its picturesque harbor, maritime history, and excellent quality of life." }
+            ],
+            "Energy Systems Engineering": [
+                { id: 1200, name: "Montanuniversität Leoben", country: "Austria", city: "Leoben", lat: 47.38, lon: 15.09, weather: "🌷 Spring: 3-14°C, ❄️ Winter: -5 to 2°C", cost: "€800-1000/month", website: "https://www.unileoben.ac.at/en/", ranking: "Not Ranked", language: "A specialized university with excellent English courses in industrial energy technology.", courses: "Industrial Energy Technology, Renewable Energy Systems, Thermal Engineering.", cityInfo: "Leoben is a historic mining town in the heart of Styria, Austria, surrounded by mountains. It offers a unique focus on materials science, mining, and metallurgy with a tight-knit student community." },
+                { id: 1201, name: "Bialystok University of Technology", country: "Poland", city: "Bialystok", lat: 53.12, lon: 23.15, weather: "🌷 Spring: 2-12°C, ❄️ Winter: -6 to 0°C", cost: "€350-500/month", website: "https://pb.edu.pl/en/", ranking: "1201-1400", language: "Faculty of Engineering offers relevant courses in English.", courses: "Power Engineering, Heat Transfer, Renewable Energy.", cityInfo: "Bialystok is a major city in northeastern Poland, known for its beautiful Branicki Palace and proximity to the Białowieża Forest, a UNESCO World Heritage site." },
+                { id: 1202, name: "AGH University of Science and Technology", country: "Poland", city: "Krakow", lat: 50.06, lon: 19.92, weather: "🌷 Spring: 3-13°C, ❄️ Winter: -5 to 1°C", cost: "€450-650/month", website: "https://www.agh.edu.pl/en", ranking: "901-950", language: "Faculty of Energy and Fuels has a very strong reputation with full programs in English.", courses: "Sustainable Energy Development, Power Systems, Thermal Engineering.", cityInfo: "Krakow is a historic gem, known for its stunning Main Market Square and Wawel Castle. It's a vibrant student city with a lively nightlife and affordable living costs." },
+                { id: 1203, name: "Universidad de Burgos", country: "Spain", city: "Burgos", lat: 42.34, lon: -3.70, weather: "🌷 Spring: 4-15°C, ❄️ Winter: 0-7°C", cost: "€600-800/month", website: "https://www.ubu.es/english-version", ranking: "Not Ranked", language: "Some engineering courses are available in English, but a good level of Spanish is highly recommended.", courses: "Thermodynamics, Electrical Energy, Fluid Mechanics.", cityInfo: "Burgos is a historic city in northern Spain, famous for its magnificent Gothic cathedral, a UNESCO World Heritage site. It's a key stop on the Camino de Santiago pilgrimage route." },
+                { id: 1204, name: "Albert-Ludwigs-Universitaet Freiburg", country: "Germany", city: "Freiburg", lat: 47.99, lon: 7.85, weather: "🌷 Spring: 6-17°C, ❄️ Winter: 0-5°C", cost: "€900-1100/month", website: "https://uni-freiburg.de/en/", ranking: "192", language: "Excellent programs in Sustainable Systems Engineering and Renewable Energy Management taught in English.", courses: "Solar Energy, Energy Conversion, Power Electronics.", cityInfo: "Freiburg is one of Germany's greenest and sunniest cities, located on the edge of the Black Forest. It's renowned for its high quality of life, sustainability initiatives, and beautiful medieval old town." },
+                { id: 1205, name: "Universita della Calabria", country: "Italy", city: "Cosenza", lat: 39.36, lon: 16.23, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 5-12°C", cost: "€600-750/month", website: "https://www.unical.it/en/", ranking: "901-950", language: "Good selection of energy-related engineering courses in English.", courses: "Energy Engineering, Power Systems, Thermodynamics.", cityInfo: "Located in Southern Italy, Cosenza has a beautiful old town and a modern city center. The university campus is one of the largest in Italy, creating a vibrant student community." },
+                { id: 1206, name: "Universita degli Studi di Ferrara", country: "Italy", city: "Ferrara", lat: 44.83, lon: 11.63, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 0-6°C", cost: "€700-850/month", website: "https://www.unife.it/it/en", ranking: "951-1000", language: "Good number of engineering courses in English relevant to energy systems.", courses: "Mechanical Systems, Thermodynamics, Electrical Engineering.", cityInfo: "Ferrara is a beautiful Renaissance city in Northern Italy, surrounded by medieval walls. It's a cyclist's paradise, known for its excellent food and high quality of life." }
+            ],
+            "Environmental Engineering": [
+                { id: 1300, name: "Instituto Politécnico da Guarda", country: "Portugal", city: "Guarda", lat: 40.53, lon: -7.26, weather: "🌷 Spring: 5-15°C, ❄️ Winter: 1-7°C", cost: "€500-700/month", website: "https://www.ipg.pt/website/international-students/", ranking: "Not Ranked", language: "Some courses may be offered in English, but Portuguese is the primary language.", courses: "Environmental Technology, Renewable Energy, Water Treatment.", cityInfo: "Guarda is the highest city in Portugal, known for its fresh mountain air, historic stone architecture, and stunning views of the Serra da Estrela natural park." },
+                { id: 1301, name: "Bialystok University of Technology", country: "Poland", city: "Bialystok", lat: 53.12, lon: 23.15, weather: "🌷 Spring: 2-12°C, ❄️ Winter: -6 to 0°C", cost: "€350-500/month", website: "https://pb.edu.pl/en/", ranking: "1201-1400", language: "The Faculty of Civil and Environmental Engineering offers a full program in English.", courses: "Water and Wastewater Technology, Environmental Protection, Waste Management.", cityInfo: "Bialystok is a major city in northeastern Poland, known for its beautiful Branicki Palace and proximity to the Białowieża Forest, a UNESCO World Heritage site." },
+                { id: 1302, name: "Universita degli Studi di Napoli Federico II", country: "Italy", city: "Naples", lat: 40.85, lon: 14.25, weather: "🌷 Spring: 11-20°C, ❄️ Winter: 5-13°C", cost: "€700-950/month", website: "http://www.international.unina.it/", ranking: "392", language: "Strong engineering school with good English course availability.", courses: "Environmental Impact Assessment, Remediation Technologies, Water Resources.", cityInfo: "Naples is one of Italy's oldest, most artistic, and delicious cities. Live amidst vibrant street life, incredible history (Pompeii is nearby), and the birthplace of pizza." },
+                { id: 1303, name: "Technische Universitaet Berlin", country: "Germany", city: "Berlin", lat: 52.51, lon: 13.32, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 4°C", cost: "€950-1300/month", website: "https://www.tu.berlin/en/", ranking: "154", language: "A top technical university with excellent graduate programs in English related to environmental science.", courses: "Environmental Modeling, Water Resources Management, Air Pollution Control.", cityInfo: "Berlin is Germany's vibrant, multicultural capital. It's a global center for art, architecture, and history, offering an unparalleled student experience with a relatively low cost of living for a major capital." },
+                { id: 1304, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Full program in Environmental Engineering is available in English.", courses: "Water and Wastewater Treatment, Environmental Technology, Renewable Energy.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 1305, name: "Wroclaw University of Science and Technology", country: "Poland", city: "Wroclaw", lat: 51.11, lon: 17.06, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 3°C", cost: "€450-650/month", website: "https://pwr.edu.pl/en/", ranking: "901-950", language: "Excellent and comprehensive Environmental Engineering program in English.", courses: "Environmental Protection, Waste Management, Water Supply Systems.", cityInfo: "Wrocław is a vibrant city in western Poland, known for its beautiful Market Square lined with colorful townhouses, numerous bridges, and lively student population." },
+                { id: 1306, name: "University of Szeged", country: "Hungary", city: "Szeged", lat: 46.25, lon: 20.14, weather: "🌷 Spring: 8-19°C, ❄️ Winter: -3 to 3°C", cost: "€500-700/month", website: "https://u-szeged.hu/english", ranking: "601-610", language: "Faculty of Science and Informatics offers relevant courses in English.", courses: "Environmental Science, Ecology, Water Management.", cityInfo: "Szeged is the third-largest city in Hungary, known as the 'City of Sunshine'. It's a lively university town with a beautiful city center, open-air festivals, and a relaxed atmosphere." },
+                { id: 1307, name: "Politechnika Lubelska", country: "Poland", city: "Lublin", lat: 51.23, lon: 22.54, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -5 to 0°C", cost: "€400-600/month", website: "https://en.pollub.pl/", ranking: "Not Ranked", language: "Faculty of Environmental Engineering offers a full program in English.", courses: "Water Supply and Sewage Disposal, Renewable Energy, Air Protection.", cityInfo: "Lublin is a major academic and cultural center in eastern Poland. It features a beautifully preserved Old Town, a historic castle, and a vibrant student life with an affordable cost of living." },
+                { id: 1308, name: "Slovak University of Technology in Bratislava", country: "Slovakia", city: "Bratislava", lat: 48.15, lon: 17.11, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€650-900/month", website: "https://www.stuba.sk/english.html?page_id=1", ranking: "1001-1200", language: "The Faculty of Chemical and Food Technology offers Environmental Engineering courses in English.", courses: "Environmental Analysis, Water Technology, Waste Treatment.", cityInfo: "Bratislava, the capital of Slovakia, sits on the Danube River bordering Austria and Hungary. It's known for its lively old town, a beautiful hilltop castle, and vibrant cafe culture." },
+                { id: 1309, name: "Lucian Blaga University of Sibiu", country: "Romania", city: "Sibiu", lat: 45.79, lon: 24.15, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.ulbsibiu.ro/en/", ranking: "1201-1400", language: "The Faculty of Engineering offers related courses, with some in English.", courses: "Industrial Engineering, Environmental Management, Quality Engineering.", cityInfo: "Sibiu is a charming city in Transylvania, known for its Germanic architecture and beautifully preserved medieval old town. It was a European Capital of Culture and has a rich cultural life." },
+                { id: 1310, name: "Technical University of Varna", country: "Bulgaria", city: "Varna", lat: 43.22, lon: 27.94, weather: "🌷 Spring: 7-16°C, ❄️ Winter: 0-6°C", cost: "€400-550/month", website: "https://www.tu-varna.bg/tu-varna/index.php/en/", ranking: "Not Ranked", language: "Programs in English are available, with a strong focus on marine ecology and protection.", courses: "Ecology and Environmental Protection, Water Treatment, Marine Ecology.", cityInfo: "Varna is Bulgaria's 'sea capital,' a major tourist destination on the Black Sea coast. Enjoy beautiful beaches, a large seaside park, and a lively atmosphere in the summer." }
+            ],    
+            "Food Engineering": [
+                { id: 1400, name: "Agricultural University of Athens", country: "Greece", city: "Athens", lat: 37.98, lon: 23.70, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€750-950/month", website: "https://www2.aua.gr/en", ranking: "Not Ranked", language: "The Department of Food Science and Human Nutrition offers courses in English for Erasmus students.", courses: "Food Chemistry, Food Technology, Quality Control.", cityInfo: "As a student in Athens, you'll live in a city where ancient history meets modern life. Enjoy vibrant street life, delicious food, and sunny weather year-round." },
+                { id: 1401, name: "Slovak University of Technology in Bratislava", country: "Slovakia", city: "Bratislava", lat: 48.15, lon: 17.11, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€650-900/month", website: "https://www.stuba.sk/english.html?page_id=1", ranking: "1001-1200", language: "The Faculty of Chemical and Food Technology has a full program available in English.", courses: "Food Chemistry and Analysis, Food Technology, Biotechnology.", cityInfo: "Bratislava, the capital of Slovakia, sits on the Danube River bordering Austria and Hungary. It's known for its lively old town, a beautiful hilltop castle, and vibrant cafe culture." },
+                { id: 1402, name: "Josip Juraj Strossmayer University of Osijek", country: "Croatia", city: "Osijek", lat: 45.55, lon: 18.69, weather: "🌷 Spring: 8-19°C, ❄️ Winter: -2 to 4°C", cost: "€500-700/month", website: "https://www.unios.hr/en/", ranking: "Not Ranked", language: "The Faculty of Food Technology offers a comprehensive program in English.", courses: "Food Process Engineering, Food Quality Control, Food Microbiology.", cityInfo: "Osijek is the largest city in eastern Croatia, located on the Drava river. It's known for its beautiful baroque architecture, green parks, and a relaxed, welcoming atmosphere." },
+                { id: 1403, name: "Beuth University of Applied Sciences Berlin", country: "Germany", city: "Berlin", lat: 52.54, lon: 13.35, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 4°C", cost: "€900-1200/month", website: "https://www.bht-berlin.de/en/", ranking: "Not Ranked", language: "The Life Sciences and Technology faculty has relevant courses in English. German B1 may be required.", courses: "Food Technology, Biotechnology, Process Engineering.", cityInfo: "Berlin is Germany's vibrant, multicultural capital. It's a global center for art, architecture, and history, offering an unparalleled student experience with a relatively low cost of living for a major capital." },
+                { id: 1404, name: "University of Technology and Life Sciences in Bydgoszcz", country: "Poland", city: "Bydgoszcz", lat: 53.12, lon: 18.00, weather: "🌷 Spring: 4-14°C, ❄️ Winter: -4 to 1°C", cost: "€400-600/month", website: "https://www.utp.edu.pl/en/", ranking: "Not Ranked", language: "Faculty of Chemical Technology and Engineering offers courses in English.", courses: "Food Technology, Chemical Engineering, Biotechnology.", cityInfo: "Bydgoszcz is a dynamic city in northern Poland, known for its picturesque riverfront, historic granaries, and vibrant cultural scene, including an acclaimed opera house." },
+                { id: 1405, name: "University of West Attica", country: "Greece", city: "Athens", lat: 38.00, lon: 23.67, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€700-900/month", website: "https://www.uniwa.gr/en/", ranking: "Not Ranked", language: "The Department of Food Science and Technology offers a selection of courses in English.", courses: "Food Processing, Quality Management, Food Chemistry.", cityInfo: "Athens is the historic capital of Europe. Immerse yourself in thousands of years of history at the Acropolis, enjoy the Mediterranean climate, and experience a bustling modern city." },
+                { id: 1406, name: "University of Latvia", country: "Latvia", city: "Riga", lat: 56.95, lon: 24.11, weather: "🌷 Spring: 2-10°C, ❄️ Winter: -5 to 0°C", cost: "€600-800/month", website: "https://www.lu.lv/en/", ranking: "781-790", language: "The Faculty of Chemistry has related courses. Check specific availability in English.", courses: "Chemistry of Food, Analytical Chemistry, Organic Chemistry.", cityInfo: "Riga, Latvia's capital, is the largest city in the Baltics. It's known for its beautiful Art Nouveau architecture, a well-preserved Old Town, and a vibrant cultural scene." },
+                { id: 1407, name: "University of Pitesti", country: "Romania", city: "Pitesti", lat: 44.85, lon: 24.87, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€350-500/month", website: "https://www.upit.ro/en/", ranking: "Not Ranked", language: "The Faculty of Sciences has a Food Engineering program with some courses in English.", courses: "Food Engineering, Food Control, Food Processing Technologies.", cityInfo: "Pitesti is an important commercial and industrial center in Romania, known as the 'city of tulips.' It offers a very low cost of living and is close to the beautiful Carpathian Mountains." },
+                { id: 1408, name: "Warsaw University of Life Sciences (SGGW)", country: "Poland", city: "Warsaw", lat: 52.16, lon: 21.04, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 1°C", cost: "€550-800/month", website: "https://www.sggw.pl/en/", ranking: "1201-1400", language: "The Faculty of Food Sciences offers a comprehensive program fully taught in English.", courses: "Food Technology, Human Nutrition, Food Quality Assessment.", cityInfo: "Warsaw, the capital of Poland, is a resilient city that has been beautifully rebuilt. It offers a rich history, a vibrant cultural scene, beautiful parks, and a dynamic student life." },
+                { id: 1409, name: "Universita degli Studi di Milano", country: "Italy", city: "Milan", lat: 45.46, lon: 9.19, weather: "🌷 Spring: 9-20°C, ❄️ Winter: 0-6°C", cost: "€1000-1400/month", website: "https://www.unimi.it/en", ranking: "123", language: "Excellent Food Science and Technology programs with many courses taught in English.", courses: "Food Science and Technology, Food Safety, Agricultural Sciences.", cityInfo: "Milan is a global capital of fashion and design, a financial hub, and home to high-end shops and restaurants. It's a fast-paced, cosmopolitan city with a rich artistic heritage." },
+                { id: 1410, name: "University of Rzeszow", country: "Poland", city: "Rzeszow", lat: 50.04, lon: 22.00, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://ur.edu.pl/en/", ranking: "Not Ranked", language: "The Faculty of Biology and Agriculture has a Food Technology program with courses in English.", courses: "Food Technology, Human Nutrition, Food Processing.", cityInfo: "Rzeszów is the largest city in southeastern Poland. It's a growing academic and economic center with a beautiful market square, underground tourist routes, and a lively student atmosphere." },
+                { id: 1411, name: "Lucian Blaga University of Sibiu", country: "Romania", city: "Sibiu", lat: 45.79, lon: 24.15, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.ulbsibiu.ro/en/", ranking: "1201-1400", language: "The Faculty of Agricultural Sciences, Food Industry and Environmental Protection offers programs in English.", courses: "Food Control and Expertise, Food Engineering, Consumer Protection.", cityInfo: "Sibiu is a charming city in Transylvania, known for its Germanic architecture and beautifully preserved medieval old town. It was a European Capital of Culture and has a rich cultural life." }
+            ],
+            "Materials Science and Engineering": [
+                { id: 1500, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Excellent selection of technical courses in English at the Faculty of Applied Physics and Mathematics.", courses: "Materials Physics, Crystallography, Nanomaterials, Polymers.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 1501, name: "University of Pitesti", country: "Romania", city: "Pitesti", lat: 44.85, lon: 24.87, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€350-500/month", website: "https://www.upit.ro/en/", ranking: "Not Ranked", language: "The Faculty of Mechanics and Technology offers some courses in English.", courses: "Materials Technology, Metallurgy, Mechanical Properties of Materials.", cityInfo: "Pitesti is an important commercial and industrial center in Romania, known as the 'city of tulips.' It offers a very low cost of living and is close to the beautiful Carpathian Mountains." },
+                { id: 1502, name: "Politechnika Krakowska", country: "Poland", city: "Krakow", lat: 50.07, lon: 19.94, weather: "🌷 Spring: 3-13°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.pk.edu.pl/index.php?lang=en", ranking: "1201-1400", language: "Faculty of Materials Engineering and Physics offers a good selection of courses in English.", courses: "Biomaterials, Polymers, Composite Materials, Metallurgy.", cityInfo: "Krakow is a historic gem, known for its stunning Main Market Square and Wawel Castle. It's a vibrant student city with a lively nightlife and affordable living costs." },
+                { id: 1503, name: "National Technical University of Athens", country: "Greece", city: "Athens", lat: 37.98, lon: 23.78, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€750-950/month", website: "https://www.ntua.gr/en/", ranking: "347", language: "The School of Chemical Engineering has strong materials science courses available in English.", courses: "Science and Engineering of Materials, Polymers, Process Metallurgy.", cityInfo: "As a student in Athens, you'll live in a city where ancient history meets modern life. Enjoy vibrant street life, delicious food, and sunny weather year-round." },
+                { id: 1504, name: "Politechnika Slaska", country: "Poland", city: "Gliwice", lat: 50.29, lon: 18.67, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 2°C", cost: "€450-650/month", website: "https://www.polsl.pl/en/", ranking: "1201-1400", language: "Faculty of Materials Engineering and Metallurgy offers courses in English.", courses: "Materials Science, Metallurgy, Biomaterials, Nanomaterials.", cityInfo: "Gliwice is a city in the Silesia region of southern Poland, part of a large urban conurbation. It's an important industrial and academic center with a charming old town and market square." },
+                { id: 1505, name: "Università di Modena e Reggio Emilia", country: "Italy", city: "Modena", lat: 44.70, lon: 10.63, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 0-6°C", cost: "€750-900/month", website: "https://www.unimore.it/", ranking: "691-700", language: "Very strong in materials science, especially related to automotive and ceramics. Good English selection.", courses: "Ceramic Materials, Polymeric Materials, Automotive Materials.", cityInfo: "Modena is the heart of Italy's 'Motor Valley,' home to Ferrari, Lamborghini, and Maserati. It's also a culinary capital, famous for balsamic vinegar and Parmesan cheese." },
+                { id: 1506, name: "University of Patras", country: "Greece", city: "Patras", lat: 38.25, lon: 21.74, weather: "🌷 Spring: 11-20°C, ❄️ Winter: 6-14°C", cost: "€650-850/month", website: "https://www.upatras.gr/en/", ranking: "951-1000", language: "Department of Materials Science has a robust program with many courses in English.", courses: "Ceramics, Polymers, Electronic Materials, Biomaterials.", cityInfo: "Patras is Greece's third-largest city and a major port connecting to Italy. It's known for its vibrant carnival, a large university student population, and the impressive Rio-Antirrio Bridge." },
+                { id: 1507, name: "École Normale Supérieure Paris-Saclay", country: "France", city: "Paris (Saclay)", lat: 48.71, lon: 2.16, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 2-7°C", cost: "€1000-1400/month", website: "https://ens-paris-saclay.fr/en", ranking: "71", language: "A top-tier university with excellent, research-focused courses in English.", courses: "Fundamental Materials Science, Nanomaterials, Soft Matter.", cityInfo: "While on the outskirts, you have easy access to Paris, one of the world's most iconic cities. Enjoy world-class museums, cuisine, and culture, though with a higher cost of living." },
+                { id: 1508, name: "Universidade do Minho", country: "Portugal", city: "Guimarães", lat: 41.44, lon: -8.29, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 5-14°C", cost: "€600-800/month", website: "https://www.uminho.pt/EN", ranking: "611-620", language: "Excellent polymer engineering and materials science programs with full English availability.", courses: "Polymer Engineering, Biomaterials, Nanomaterials.", cityInfo: "The engineering campus is in Guimarães, the birthplace of Portugal. It's a UNESCO World Heritage site with a beautifully preserved medieval center and a lively student atmosphere." },
+                { id: 1509, name: "University of Technology of Tarbes Occitanie Pyrénées (UTTOP)", country: "France", city: "Tarbes", lat: 43.23, lon: 0.08, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 1-10°C", cost: "€650-850/month", website: "https://www.enit.fr/en/index.html", ranking: "Not Ranked", language: "A specialized engineering school with project-based learning. English courses available.", courses: "Materials and Structures, Mechanical Engineering, Industrial Systems.", cityInfo: "Tarbes is a city in the foothills of the Pyrenees mountains in southwestern France. It's a great base for outdoor activities like hiking and skiing and has a relaxed atmosphere." }
+            ],    
+            "Mechanical Engineering": [
+                { id: 0, name: "Politechnika Krakowska", country: "Poland", city: "Krakow", lat: 50.07, lon: 19.94, weather: "🌷 Spring: 3-13°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.pk.edu.pl/index.php?lang=en", ranking: "1201-1400", language: "Good selection of courses in English.", courses: "Thermodynamics, Fluid Mechanics, Manufacturing.", cityInfo: "Krakow is a historic gem, known for its stunning Main Market Square and Wawel Castle. It's a vibrant student city with a lively nightlife and affordable living costs." },
+                { id: 1, name: "Bialystok University of Technology", country: "Poland", city: "Bialystok", lat: 53.12, lon: 23.15, weather: "🌷 Spring: 2-12°C, ❄️ Winter: -6 to 0°C", cost: "€350-500/month", website: "https://pb.edu.pl/en/", ranking: "1201-1400", language: "Many courses offered in English for exchange students.", courses: "Heat Transfer, Control Systems, Machine Design.", cityInfo: "Bialystok is a major city in northeastern Poland, known for its beautiful Branicki Palace and proximity to the Białowieża Forest, a UNESCO World Heritage site." },
+                { id: 2, name: "FH Südwestfalen", country: "Germany", city: "Iserlohn", lat: 51.37, lon: 7.5, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 0-5°C", cost: "€750-900/month", website: "https://www.fh-swf.de/en/", ranking: "Not Ranked", language: "English & German. B1 German certificate may be required.", courses: "Focus on Applied Mechanics and Automotive Engineering.", cityInfo: "A university of applied sciences spread across several locations in North Rhine-Westphalia, known for its close ties to local industry and practical education." },
+                { id: 3, name: "Beuth University of Applied Sciences Berlin", country: "Germany", city: "Berlin", lat: 52.54, lon: 13.35, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 4°C", cost: "€900-1200/month", website: "https://www.bht-berlin.de/en/", ranking: "Not Ranked", language: "English & German. B1 German certificate may be required.", courses: "Control Systems, Manufacturing Processes.", cityInfo: "Berlin is Germany's vibrant, multicultural capital. It's a global center for art, music, and history, offering an unparalleled student experience with a relatively low cost of living for a major capital." },
+                { id: 4, name: "RWTH Aachen University", country: "Germany", city: "Aachen", lat: 50.78, lon: 6.08, weather: "🌷 Spring: 5-15°C, ❄️ Winter: 1-6°C", cost: "€850-1000/month", website: "https://www.rwth-aachen.de/go/id/a/?lidx=1", ranking: "106", language: "Excellent English course selection, but competitive. B1/B2 German often required.", courses: "Very comprehensive: Thermodynamics, Fluids, Heat Transfer, Machine Design.", cityInfo: "Located at the border with Belgium and the Netherlands, Aachen is a historic city famous for its cathedral, a UNESCO World Heritage site. It's a hub for engineering and technology." },
+                { id: 5, name: "Ravensburg-Weingarten University", country: "Germany", city: "Ravensburg", lat: 47.81, lon: 9.65, weather: "🌷 Spring: 4-14°C, ❄️ Winter: -2 to 3°C", cost: "€800-950/month", website: "https://www.rwu.de/en", ranking: "Not Ranked", language: "English & German. B1 German certificate may be required.", courses: "Applied sciences focus, good for practical courses.", cityInfo: "Located in the picturesque region of Upper Swabia, near Lake Constance. It's known for its charming medieval town center and as a hub for games and puzzle companies." },
+                { id: 6, name: "University of West Attica", country: "Greece", city: "Athens", lat: 38.00, lon: 23.67, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€700-900/month", website: "https://www.uniwa.gr/en/", ranking: "Not Ranked", language: "Increasing number of courses in English.", courses: "Energy Systems, Manufacturing.", cityInfo: "Athens is the historic capital of Europe. Immerse yourself in thousands of years of history at the Acropolis, enjoy the Mediterranean climate, and experience a bustling modern city." },
+                { id: 7, name: "National Technical University of Athens", country: "Greece", city: "Athens", lat: 37.98, lon: 23.78, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€750-950/month", website: "https://www.ntua.gr/en/", ranking: "347", language: "Good English course availability in ME.", courses: "Thermodynamics, Fluid Mechanics, Control Systems.", cityInfo: "As a student in Athens, you'll live in a city where ancient history meets modern life. Enjoy vibrant street life, delicious food, and sunny weather year-round." },
+                { id: 8, name: "Zagreb University of Applied Sciences", country: "Croatia", city: "Zagreb", lat: 45.80, lon: 15.97, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -1 to 5°C", cost: "€600-800/month", website: "https://www.tvz.hr/en/", ranking: "Not Ranked", language: "Good selection of courses in English.", courses: "Applied Mechanics, Electronics.", cityInfo: "Zagreb, Croatia's capital, is a charming and lively city with beautiful Austro-Hungarian architecture. Enjoy its numerous cafes, museums, and parks, with a very affordable cost of living." },
+                { id: 9, name: "University of Split", country: "Croatia", city: "Split", lat: 43.51, lon: 16.47, weather: "🌷 Spring: 10-18°C, ❄️ Winter: 5-11°C", cost: "€650-850/month", website: "https://www.unist.hr/en/", ranking: "1201-1400", language: "Good selection of technical courses in English.", courses: "Fluid Mechanics, Machine Design.", cityInfo: "Split is a stunning coastal city on the Adriatic Sea, built around the Roman palace of Diocletian. It offers a perfect mix of history, beach life, and access to beautiful islands." },
+                { id: 10, name: "University of Maribor", country: "Slovenia", city: "Maribor", lat: 46.56, lon: 15.64, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -2 to 4°C", cost: "€550-700/month", website: "https://www.um.si/en/", ranking: "1001-1200", language: "Strong English program for engineering students.", courses: "Thermodynamics, Manufacturing, Materials.", cityInfo: "Slovenia's second-largest city, Maribor is set amidst wine-growing hills on the Drava River. It's a relaxed and green city, great for outdoor activities and very budget-friendly." },
+                { id: 11, name: "Universita della Calabria", country: "Italy", city: "Cosenza", lat: 39.36, lon: 16.23, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 5-12°C", cost: "€600-750/month", website: "https://www.unical.it/en/", ranking: "901-950", language: "Good selection of courses offered in English.", courses: "Fluid Dynamics, Mechanical Design.", cityInfo: "Located in Southern Italy, Cosenza has a beautiful old town and a modern city center. The university campus is one of the largest in Italy, creating a vibrant student community." },
+                { id: 12, name: "Universita degli Studi di Cassino", country: "Italy", city: "Cassino", lat: 41.47, lon: 13.83, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 3-12°C", cost: "€600-750/month", website: "http://www.unicas.it/en/", ranking: "1201-1400", language: "English courses available for exchange students.", courses: "Automation, Mechanics.", cityInfo: "Cassino is famously home to the historic Montecassino Abbey. The city is located between Rome and Naples, offering great opportunities for travel and exploring Italian culture." },
+                { id: 13, name: "Universita degli Studi di Ferrara", country: "Italy", city: "Ferrara", lat: 44.83, lon: 11.63, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 0-6°C", cost: "€700-850/month", website: "https://www.unife.it/it/en", ranking: "951-1000", language: "Good number of engineering courses in English.", courses: "Mechanical Systems, Thermodynamics.", cityInfo: "Ferrara is a beautiful Renaissance city in Northern Italy, surrounded by medieval walls. It's a cyclist's paradise, known for its excellent food and high quality of life." },
+                { id: 14, name: "Università della Campania Luigi Vanvitelli", country: "Italy", city: "Caserta", lat: 41.067, lon: 14.33, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 5-13°C", cost: "€650-800/month", website: "https://www.unicampania.it/index.php/en/", ranking: "1201-1400", language: "English course offerings are expanding.", courses: "Machine Design, Energy.", cityInfo: "The university is spread across several locations near Naples, with a main site in Caserta, famous for its magnificent Royal Palace, a UNESCO World Heritage site." },
+                { id: 15, name: "Università di Modena e Reggio Emilia", country: "Italy", city: "Modena", lat: 44.70, lon: 10.63, weather: "🌷 Spring: 9-19°C, ❄️ Winter: 0-6°C", cost: "€750-900/month", website: "https://www.unimore.it/", ranking: "691-700", language: "Very strong in automotive engineering, many English courses.", courses: "Vehicle Dynamics, Fluid Mechanics.", cityInfo: "Modena is the heart of Italy's 'Motor Valley,' home to Ferrari, Lamborghini, and Maserati. It's also a culinary capital, famous for balsamic vinegar and Parmesan cheese." },
+                { id: 16, name: "Universita Degli Studi di Salerno", country: "Italy", city: "Salerno", lat: 40.77, lon: 14.79, weather: "🌷 Spring: 10-19°C, ❄️ Winter: 5-13°C", cost: "€600-750/month", website: "https://web.unisa.it/en/home", ranking: "801-850", language: "Good selection of technical courses in English.", courses: "Materials Science, Mechanics.", cityInfo: "Salerno is a lively port city and the gateway to the stunning Amalfi Coast. It has a beautiful seaside promenade and a charming historic center." },
+                { id: 17, name: "Universita degli Studi di Perugia", country: "Italy", city: "Perugia", lat: 43.12, lon: 12.39, weather: "🌷 Spring: 8-18°C, ❄️ Winter: 2-9°C", cost: "€650-800/month", website: "https://www.unipg.it/en/", ranking: "731-740", language: "Good availability of courses in English.", courses: "Thermodynamics, Mechanical Plants.", cityInfo: "Perugia is the capital of the Umbria region, known as the 'green heart of Italy.' It's a historic hilltop city, famous for chocolate and its international student population." },
+                { id: 18, name: "Universita di Roma “Tor Vergata”", country: "Italy", city: "Rome", lat: 41.85, lon: 12.63, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 4-13°C", cost: "€800-1100/month", website: "https://web.uniroma2.it/en/", ranking: "489", language: "Excellent and broad selection of ME courses in English.", courses: "Fluid Mechanics, Heat Transfer, Controls.", cityInfo: "Studying in Rome offers an unforgettable experience. The city is a living museum, with iconic landmarks like the Colosseum and Vatican City. Life is vibrant, though costs are higher than in other Italian cities." },
+                { id: 19, name: "Tallinn University of Technology", country: "Estonia", city: "Tallinn", lat: 59.39, lon: 24.67, weather: "🌷 Spring: 1-9°C, ❄️ Winter: -5 to 0°C", cost: "€700-900/month", website: "https://taltech.ee/en/", ranking: "651-660", language: "Excellent English programs, strong tech focus.", courses: "Mechatronics, Control Systems, Robotics.", cityInfo: "Tallinn blends a stunningly preserved medieval Old Town with a modern, tech-savvy culture (it's the birthplace of Skype). It's a compact, dynamic, and forward-thinking capital." },
+                { id: 20, name: "EIGSI La Rochelle", country: "France", city: "La Rochelle", lat: 46.14, lon: -1.15, weather: "🌷 Spring: 8-16°C, ❄️ Winter: 3-9°C", cost: "€800-1000/month", website: "https://eigsi.fr/en/", ranking: "Not Ranked", language: "Good English program for a specialized engineering school.", courses: "General Engineering, Systems, Energy.", cityInfo: "A beautiful historic port city on the Atlantic coast. La Rochelle is known for its picturesque harbor, maritime history, and excellent quality of life." },
+                { id: 21, name: "École Normale Supérieure Paris-Saclay", country: "France", city: "Paris (Saclay)", lat: 48.71, lon: 2.16, weather: "🌷 Spring: 7-17°C, ❄️ Winter: 2-7°C", cost: "€1000-1400/month", website: "https://ens-paris-saclay.fr/en", ranking: "71", language: "Top-tier university, excellent English courses but very competitive.", courses: "Fundamental Mechanics, Materials Science.", cityInfo: "While on the outskirts, you have easy access to Paris, one of the world's most iconic cities. Enjoy world-class museums, cuisine, and culture, though with a higher cost of living." },
+                { id: 22, name: "Universitatea Politehnica Timisoara", country: "Romania", city: "Timisoara", lat: 45.75, lon: 21.23, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -2 to 4°C", cost: "€400-600/month", website: "https://www.upt.ro/english/", ranking: "1201-1400", language: "Very good selection of ME courses in English.", courses: "Thermodynamics, Fluid Mechanics, Machine Design.", cityInfo: "Known as 'Little Vienna' for its secessionist architecture, Timisoara is a multicultural and vibrant city. It's very student-friendly with extremely low living costs." },
+                { id: 23, name: "Technical University of Varna", country: "Bulgaria", city: "Varna", lat: 43.22, lon: 27.94, weather: "🌷 Spring: 7-16°C, ❄️ Winter: 0-6°C", cost: "€400-550/month", website: "https://www.tu-varna.bg/tu-varna/index.php/en/", ranking: "Not Ranked", language: "Good English offerings, especially in marine-related fields.", courses: "Marine Engineering, Thermodynamics, Mechanics.", cityInfo: "Varna is Bulgaria's 'sea capital,' a major tourist destination on the Black Sea coast. Enjoy beautiful beaches, a large seaside park, and a lively atmosphere in the summer." },
+                { id: 24, name: "FH-Joanneum University of Applied Sciences", country: "Austria", city: "Graz", lat: 47.07, lon: 15.41, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -3 to 3°C", cost: "€850-1000/month", website: "https://www.fh-joanneum.at/en/", ranking: "Not Ranked", language: "Strong English programs, especially in Automotive.", courses: "Vehicle Technology, Electronics, Manufacturing.", cityInfo: "Graz is Austria's second-largest city, with a stunning historic center (a UNESCO World Heritage site) and a relaxed, student-friendly vibe. It has a strong focus on design and technology." }
+            ],
+            "Chemistry": [
+                { id: 1600, name: "Beuth University of Applied Sciences Berlin", country: "Germany", city: "Berlin", lat: 52.54, lon: 13.35, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 4°C", cost: "€900-1200/month", website: "https://www.bht-berlin.de/en/", ranking: "Not Ranked", language: "Faculty of Life Sciences and Technology offers courses in English. German B1 may be required.", courses: "Analytical Chemistry, Organic Chemistry, Biochemistry.", cityInfo: "Berlin is Germany's vibrant, multicultural capital. It's a global center for art, architecture, and history, offering an unparalleled student experience with a relatively low cost of living for a major capital." },
+                { id: 1601, name: "University of Split", country: "Croatia", city: "Split", lat: 43.51, lon: 16.47, weather: "🌷 Spring: 10-18°C, ❄️ Winter: 5-11°C", cost: "€650-850/month", website: "https://www.unist.hr/en/", ranking: "1201-1400", language: "The Department of Chemistry offers a good range of courses in English for exchange students.", courses: "Inorganic Chemistry, Physical Chemistry, Biochemistry.", cityInfo: "Split is a stunning coastal city on the Adriatic Sea, built around the Roman palace of Diocletian. It offers a perfect mix of history, beach life, and access to beautiful islands." },
+                { id: 1602, name: "University of Chemistry and Technology, Prague", country: "Czech Republic", city: "Prague", lat: 50.08, lon: 14.42, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 2°C", cost: "€600-900/month", website: "https://www.vscht.cz/english/", ranking: "570", language: "A top-ranked chemical university with a full range of chemistry courses in English.", courses: "Organic Chemistry, Analytical Chemistry, Chemical Engineering.", cityInfo: "Prague is one of Europe's most beautiful cities, famous for its Old Town Square, Charles Bridge, and Prague Castle. It's a magical city with a rich history and a very affordable student life." },
+                { id: 1603, name: "Wroclaw University of Science and Technology", country: "Poland", city: "Wroclaw", lat: 51.11, lon: 17.06, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -3 to 3°C", cost: "€450-650/month", website: "https://pwr.edu.pl/en/", ranking: "901-950", language: "The Faculty of Chemistry has an extensive program taught in English.", courses: "Inorganic Chemistry, Organic Chemistry, Physical Chemistry.", cityInfo: "Wrocław is a vibrant city in western Poland, known for its beautiful Market Square lined with colorful townhouses, numerous bridges, and lively student population." },
+                { id: 1604, name: "University of Ljubljana", country: "Slovenia", city: "Ljubljana", lat: 46.05, lon: 14.50, weather: "🌷 Spring: 6-17°C, ❄️ Winter: -2 to 4°C", cost: "€600-850/month", website: "https://www.uni-lj.si/eng/", ranking: "671-680", language: "Excellent English programs at the Faculty of Chemistry and Chemical Technology.", courses: "Biochemistry, Analytical Chemistry, Inorganic Chemistry.", cityInfo: "Ljubljana is the green capital of Slovenia. It's a charming city with a beautiful river, a hilltop castle, and a lively cafe culture. It's known for being incredibly clean, safe, and bike-friendly." },
+                { id: 1605, name: "Universita degli Studi di Roma “Tor Vergata”", country: "Italy", city: "Rome", lat: 41.85, lon: 12.63, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 4-13°C", cost: "€800-1100/month", website: "https://web.uniroma2.it/en/", ranking: "489", language: "A wide range of science courses are available in English.", courses: "Organic Chemistry, Physical Chemistry, Analytical Chemistry.", cityInfo: "Studying in Rome offers an unforgettable experience. The city is a living museum, with iconic landmarks like the Colosseum and Vatican City. Life is vibrant, though costs are higher than in other Italian cities." },
+                { id: 1606, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "The Faculty of Chemistry offers a full program taught in English.", courses: "Inorganic Chemistry, Organic Chemistry, Physical Chemistry, Chemical Technology.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 1607, name: "University of Latvia", country: "Latvia", city: "Riga", lat: 56.95, lon: 24.11, weather: "🌷 Spring: 2-10°C, ❄️ Winter: -5 to 0°C", cost: "€600-800/month", website: "https://www.lu.lv/en/", ranking: "781-790", language: "The Faculty of Chemistry has a strong program with many courses offered in English.", courses: "Organic Chemistry, Physical Chemistry, Environmental Chemistry.", cityInfo: "Riga, Latvia's capital, is the largest city in the Baltics. It's known for its beautiful Art Nouveau architecture, a well-preserved Old Town, and a vibrant cultural scene." },
+                { id: 1608, name: "Technische Universität Wien (TU Wien)", country: "Austria", city: "Vienna", lat: 48.20, lon: 16.37, weather: "🌷 Spring: 7-17°C, ❄️ Winter: -2 to 3°C", cost: "€950-1300/month", website: "https://www.tuwien.at/en/", ranking: "190", language: "A top technical university with excellent English courses in Technical Chemistry.", courses: "Materials Chemistry, Synthetic Chemistry, Analytical Chemistry.", cityInfo: "Vienna is Austria's capital, known for its imperial palaces, classical music legacy, and coffee-house culture. It's a city of high culture, stunning architecture, and an exceptional quality of life." },
+                { id: 1609, name: "Sapienza Universita di Roma", country: "Italy", city: "Rome", lat: 41.90, lon: 12.51, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 4-13°C", cost: "€850-1200/month", website: "https://www.uniroma1.it/en/pagina-strutturale/home", ranking: "134", language: "One of the world's oldest universities with a vast selection of science courses in English.", courses: "General Chemistry, Organic Chemistry, Physical Chemistry.", cityInfo: "Studying in Rome offers an unforgettable experience. The city is a living museum, with iconic landmarks like the Colosseum and Vatican City. Life is vibrant, though costs are higher than in other Italian cities." },
+                { id: 1610, name: "Babes-Bolyai University", country: "Romania", city: "Cluj-Napoca", lat: 46.77, lon: 23.59, weather: "🌷 Spring: 6-16°C, ❄️ Winter: -5 to 1°C", cost: "€450-650/month", website: "https://www.ubbcluj.ro/en/", ranking: "801-850", language: "The Faculty of Chemistry and Chemical Engineering has full study lines in English.", courses: "Inorganic Chemistry, Organic Chemistry, Chemical Engineering.", cityInfo: "Cluj-Napoca is the unofficial capital of the Transylvania region and a vibrant academic hub. It's known for its lively arts scene, beautiful historic architecture, and large student population." },
+                { id: 1611, name: "University of Pitesti", country: "Romania", city: "Pitesti", lat: 44.85, lon: 24.87, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€350-500/month", website: "https://www.upit.ro/en/", ranking: "Not Ranked", language: "The Faculty of Sciences offers chemistry-related courses, with some availability in English.", courses: "General Chemistry, Applied Chemistry, Environmental Chemistry.", cityInfo: "Pitesti is an important commercial and industrial center in Romania, known as the 'city of tulips.' It offers a very low cost of living and is close to the beautiful Carpathian Mountains." }
+            ],
+            "Mathematics": [
+                { id: 1700, name: "University of Almeria", country: "Spain", city: "Almeria", lat: 36.85, lon: -2.40, weather: "🌷 Spring: 14-22°C, ❄️ Winter: 9-18°C", cost: "€600-800/month", website: "https://www.ual.es/en/", ranking: "1001-1200", language: "Some mathematics courses are offered in English, but proficiency in Spanish is highly recommended.", courses: "Algebra, Calculus, Statistics, Differential Equations.", cityInfo: "Almería is located on the sunny southeastern coast of Spain. It's known for its Moorish fortress (the Alcazaba), beautiful beaches, and being one of the driest places in Europe." },
+                { id: 1701, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "The Faculty of Applied Physics and Mathematics offers a wide range of courses in English.", courses: "Linear Algebra, Mathematical Analysis, Probability Theory.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 1702, name: "University of Split", country: "Croatia", city: "Split", lat: 43.51, lon: 16.47, weather: "🌷 Spring: 10-18°C, ❄️ Winter: 5-11°C", cost: "€650-850/month", website: "https://www.unist.hr/en/", ranking: "1201-1400", language: "The Faculty of Science offers a good selection of mathematics courses in English.", courses: "Analysis, Algebra, Numerical Mathematics, Topology.", cityInfo: "Split is a stunning coastal city on the Adriatic Sea, built around the Roman palace of Diocletian. It offers a perfect mix of history, beach life, and access to beautiful islands." },
+                { id: 1703, name: "University of Pitesti", country: "Romania", city: "Pitesti", lat: 44.85, lon: 24.87, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€350-500/month", website: "https://www.upit.ro/en/", ranking: "Not Ranked", language: "The Faculty of Sciences, Physical Education and Informatics offers some courses in English.", courses: "Mathematical Analysis, Geometry, Algebra.", cityInfo: "Pitesti is an important commercial and industrial center in Romania, known as the 'city of tulips.' It offers a very low cost of living and is close to the beautiful Carpathian Mountains." },
+                { id: 1704, name: "University of the Aegean", country: "Greece", city: "Samos", lat: 37.79, lon: 26.98, weather: "🌷 Spring: 13-22°C, ❄️ Winter: 8-15°C", cost: "€600-800/month", website: "https://www.aegean.gr/en/", ranking: "1001-1200", language: "The Department of Mathematics is located on the island of Samos and offers courses in English for Erasmus students.", courses: "Real Analysis, Abstract Algebra, Statistics.", cityInfo: "The department is on Samos, a beautiful Greek island in the eastern Aegean Sea. It's known for its lush green landscapes, ancient history (birthplace of Pythagoras), and stunning beaches." },
+                { id: 1705, name: "University of Ostrava", country: "Czech Republic", city: "Ostrava", lat: 49.83, lon: 18.29, weather: "🌷 Spring: 6-16°C, ❄️ Winter: -4 to 1°C", cost: "€500-700/month", website: "https://www.osu.eu/en/", ranking: "1201-1400", language: "The Faculty of Science provides a good selection of mathematics courses in English.", courses: "Mathematical Analysis, Linear Algebra, Number Theory.", cityInfo: "Ostrava is the third-largest city in the Czech Republic, located in the Moravian-Silesian region. It has a rich industrial history and has transformed into a vibrant cultural center with unique attractions." },
+                { id: 1706, name: "University of Primorska", country: "Slovenia", city: "Koper", lat: 45.54, lon: 13.73, weather: "🌷 Spring: 9-18°C, ❄️ Winter: 2-8°C", cost: "€550-750/month", website: "https://www.upr.si/en/", ranking: "Not Ranked", language: "The Faculty of Mathematics, Natural Sciences and Information Technologies offers many courses in English.", courses: "Discrete Mathematics, Mathematical Modelling, Statistics.", cityInfo: "The university is based in Koper, a charming coastal city in Slovenia with a beautiful Venetian-Gothic old town. It offers a Mediterranean atmosphere and easy access to Italy and Croatia." },
+                { id: 1707, name: "Umea University", country: "Sweden", city: "Umea", lat: 63.82, lon: 20.30, weather: "🌷 Spring: -2 to 7°C, ❄️ Winter: -12 to -4°C", cost: "€900-1200/month", website: "https://www.umu.se/en/", ranking: "465", language: "Excellent selection of mathematics courses at all levels, fully taught in English.", courses: "Real Analysis, Abstract Algebra, Fourier Analysis.", cityInfo: "Umeå is a dynamic university city in northern Sweden, known for its young population, vibrant cultural scene, and proximity to nature. Be prepared for cold, snowy winters and beautiful summers." },
+                { id: 1708, name: "Universidade do Porto", country: "Portugal", city: "Porto", lat: 41.15, lon: -8.62, weather: "🌷 Spring: 10-18°C, ❄️ Winter: 6-14°C", cost: "€700-950/month", website: "https://sigarra.up.pt/up/en/web_base.gera_pagina?p_pagina=home", ranking: "253", language: "A top-ranked university with a wide range of mathematics courses available in English.", courses: "Mathematical Analysis, Linear Algebra, Geometry.", cityInfo: "Porto is a historic and vibrant coastal city in northern Portugal, famous for its Port wine, stunning bridges over the Douro river, and a colorful riverside district, the Ribeira." },
+                { id: 1709, name: "University of Latvia", country: "Latvia", city: "Riga", lat: 56.95, lon: 24.11, weather: "🌷 Spring: 2-10°C, ❄️ Winter: -5 to 0°C", cost: "€600-800/month", website: "https://www.lu.lv/en/", ranking: "781-790", language: "The Faculty of Physics, Mathematics and Optometry offers a solid selection of courses in English.", courses: "Mathematical Analysis, Algebra, Differential Equations.", cityInfo: "Riga, Latvia's capital, is the largest city in the Baltics. It's known for its beautiful Art Nouveau architecture, a well-preserved Old Town, and a vibrant cultural scene." },
+                { id: 1710, name: "Lucian Blaga University of Sibiu", country: "Romania", city: "Sibiu", lat: 45.79, lon: 24.15, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -5 to 1°C", cost: "€400-600/month", website: "https://www.ulbsibiu.ro/en/", ranking: "1201-1400", language: "The Faculty of Sciences has a mathematics department with some courses available in English.", courses: "Analysis, Algebra, Geometry, Computer Science.", cityInfo: "Sibiu is a charming city in Transylvania, known for its Germanic architecture and beautifully preserved medieval old town. It was a European Capital of Culture and has a rich cultural life." },
+                { id: 1711, name: "National Technical University of Athens", country: "Greece", city: "Athens", lat: 37.98, lon: 23.78, weather: "🌷 Spring: 12-22°C, ❄️ Winter: 7-15°C", cost: "€750-950/month", website: "https://www.ntua.gr/en/", ranking: "347", language: "The School of Applied Mathematical and Physical Sciences offers an excellent, rigorous program in English.", courses: "Real Analysis, Complex Analysis, Algebra, Differential Equations.", cityInfo: "As a student in Athens, you'll live in a city where ancient history meets modern life. Enjoy vibrant street life, delicious food, and sunny weather year-round." }
+            ],
+            "Molecular Biology and Genetics": [
+                { id: 1800, name: "Göteborgs Universitet", country: "Sweden", city: "Gothenburg", lat: 57.70, lon: 11.97, weather: "🌷 Spring: 3-12°C, ❄️ Winter: -2 to 2°C", cost: "€950-1300/month", website: "https://www.gu.se/en", ranking: "187", language: "Excellent English programs in life sciences at the Faculty of Science.", courses: "Molecular Biology, Genetics, Cell Biology, Bioinformatics.", cityInfo: "Gothenburg is Sweden's second-largest city, a friendly and relaxed port known for its canals, neoclassical architecture, and lively cultural scene. It has a strong focus on sustainability and design." },
+                { id: 1801, name: "University of Rzeszow", country: "Poland", city: "Rzeszow", lat: 50.04, lon: 22.00, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -4 to 1°C", cost: "€400-600/month", website: "https://www.ur.edu.pl/en/", ranking: "Not Ranked", language: "The Faculty of Biology and Agriculture offers a growing number of courses in English, especially in biotechnology.", courses: "Genetics, Microbiology, Biotechnology, Cell Biology.", cityInfo: "Rzeszów is the largest city in southeastern Poland. It's a dynamic academic and economic hub with a charming market square and a growing reputation for innovation." },
+                { id: 1802, name: "University of Primorska", country: "Slovenia", city: "Koper", lat: 45.54, lon: 13.73, weather: "🌷 Spring: 9-18°C, ❄️ Winter: 2-8°C", cost: "€550-750/month", website: "https://www.upr.si/en/", ranking: "Not Ranked", language: "The Faculty of Health Sciences and FAMNIT offer relevant courses in English.", courses: "Biopsychology, Bioinformatics, Mediterranean Agriculture.", cityInfo: "The university is based in Koper, a charming coastal city in Slovenia with a beautiful Venetian-Gothic old town. It offers a Mediterranean atmosphere and easy access to Italy and Croatia." },
+                { id: 1803, name: "University of Latvia", country: "Latvia", city: "Riga", lat: 56.95, lon: 24.11, weather: "🌷 Spring: 2-10°C, ❄️ Winter: -5 to 0°C", cost: "€600-800/month", website: "https://www.lu.lv/en/", ranking: "781-790", language: "The Faculty of Biology has a strong program with many courses offered in English.", courses: "Molecular Biology, Genetics, Microbiology, Biotechnology.", cityInfo: "Riga, Latvia's capital, is the largest city in the Baltics. It's known for its beautiful Art Nouveau architecture, a well-preserved Old Town, and a vibrant cultural scene." },
+                { id: 1804, name: "Universität Bielefeld", country: "Germany", city: "Bielefeld", lat: 52.03, lon: 8.53, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 0-5°C", cost: "€800-1000/month", website: "https://www.uni-bielefeld.de/", ranking: "1001-1200", language: "Excellent and renowned Center for Biotechnology (CeBiTec) with many English courses.", courses: "Genome Based Systems Biology, Molecular Cell Biology, Bioinformatics.", cityInfo: "A modern university city in North Rhine-Westphalia, known for its large single-building university and its location near the scenic Teutoburg Forest." },
+                { id: 1805, name: "Babes-Bolyai University", country: "Romania", city: "Cluj-Napoca", lat: 46.77, lon: 23.59, weather: "🌷 Spring: 6-16°C, ❄️ Winter: -5 to 1°C", cost: "€450-650/month", website: "https://www.ubbcluj.ro/en/", ranking: "801-850", language: "The Faculty of Biology and Geology offers full study lines in English, making it very accessible for exchange students.", courses: "Molecular Biology, Genetics, Biochemistry, Cell Biology.", cityInfo: "Cluj-Napoca is the unofficial capital of the Transylvania region and a vibrant academic hub. It's known for its lively arts scene, beautiful historic architecture, and large student population." },
+                { id: 1806, name: "Freie Universitaet Berlin", country: "Germany", city: "Berlin", lat: 52.45, lon: 13.29, weather: "🌷 Spring: 5-15°C, ❄️ Winter: -2 to 4°C", cost: "€900-1200/month", website: "https://www.fu-berlin.de/en/", ranking: "98", language: "A top-tier university with excellent, research-focused programs in English for Biology, Chemistry, and Pharmacy.", courses: "Genetics, Cell and Molecular Biology, Biochemistry, Bioinformatics.", cityInfo: "Berlin is Germany's vibrant, multicultural capital. A global center for art, science, and history with an unparalleled student experience and a relatively low cost of living." }
+            ],
+            "Physics": [
+                { id: 100, name: "Universite de Limoges", country: "France", city: "Limoges", lat: 45.83, lon: 1.26, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 1-7°C", cost: "€700-900/month", website: "https://www.unilim.fr/", ranking: "1201-1400", language: "Good selection of science courses in English, but French is beneficial.", courses: "Optics, Quantum Mechanics, Materials Physics.", cityInfo: "Limoges is famous for its medieval and Renaissance enamels, porcelain, and oak barrels. It's a historic city in a beautiful, green region of France." },
+                { id: 101, name: "Politechnika Gdanska", country: "Poland", city: "Gdansk", lat: 54.37, lon: 18.62, weather: "🌷 Spring: 3-11°C, ❄️ Winter: -2 to 2°C", cost: "€450-650/month", website: "https://pg.edu.pl/en", ranking: "851-900", language: "Excellent selection of technical courses in English.", courses: "Theoretical Physics, Solid State Physics, Nuclear Physics.", cityInfo: "Gdańsk is a beautiful port city on the Baltic coast, with a rich history and stunningly restored old town. It's part of the Tricity metropolitan area along with Gdynia and Sopot." },
+                { id: 102, name: "Universita degli Studi di Perugia", country: "Italy", city: "Perugia", lat: 43.11, lon: 12.39, weather: "🌷 Spring: 8-18°C, ❄️ Winter: 2-9°C", cost: "€650-800/month", website: "https://www.unipg.it/en/", ranking: "731-740", language: "Good availability of courses in English.", courses: "Astrophysics, Particle Physics, Geophysics.", cityInfo: "Perugia is the capital of the Umbria region, known as the 'green heart of Italy.' It's a historic hilltop city, famous for chocolate and its international student population." },
+                { id: 103, name: "University of Split", country: "Croatia", city: "Split", lat: 43.51, lon: 16.47, weather: "🌷 Spring: 10-18°C, ❄️ Winter: 5-11°C", cost: "€650-850/month", website: "https://www.unist.hr/en/", ranking: "1201-1400", language: "Good selection of technical courses in English.", courses: "Condensed Matter Physics, Biophysics.", cityInfo: "Split is a stunning coastal city on the Adriatic Sea, built around the Roman palace of Diocletian. It offers a perfect mix of history, beach life, and access to beautiful islands." },
+                { id: 104, name: "University of Pitesti", country: "Romania", city: "Pitesti", lat: 44.85, lon: 24.87, weather: "🌷 Spring: 7-18°C, ❄️ Winter: -3 to 3°C", cost: "€350-500/month", website: "https://www.upit.ro/en/", ranking: "Not Ranked", language: "Courses in English are available for exchange students.", courses: "Nuclear Physics, Materials Science.", cityInfo: "Pitesti is an important commercial and industrial center in Romania, known as the 'city of tulips.' It offers a very low cost of living and is close to the beautiful Carpathian Mountains." },
+                { id: 105, name: "Universita degli Studi di Roma “Tor Vergata”", country: "Italy", city: "Rome", lat: 41.85, lon: 12.63, weather: "🌷 Spring: 10-20°C, ❄️ Winter: 4-13°C", cost: "€800-1100/month", website: "https://web.uniroma2.it/en/", ranking: "489", language: "Excellent and broad selection of Physics courses in English.", courses: "Astrophysics, Quantum Mechanics, Medical Physics.", cityInfo: "Studying in Rome offers an unforgettable experience. The city is a living museum, with iconic landmarks like the Colosseum and Vatican City. Life is vibrant, though costs are higher than in other Italian cities." },
+                { id: 106, name: "University of Latvia", country: "Latvia", city: "Riga", lat: 56.95, lon: 24.11, weather: "🌷 Spring: 2-10°C, ❄️ Winter: -5 to 0°C", cost: "€600-800/month", website: "https://www.lu.lv/en/", ranking: "781-790", language: "Very good English program, especially in Physics and Computing.", courses: "Solid State Physics, Optics, Theoretical Physics.", cityInfo: "Riga, Latvia's capital, is the largest city in the Baltics. It's known for its beautiful Art Nouveau architecture, a well-preserved Old Town, and a vibrant cultural scene." },
+                { id: 107, name: "University of Pisa", country: "Italy", city: "Pisa", lat: 43.72, lon: 10.40, weather: "🌷 Spring: 10-19°C, ❄️ Winter: 4-12°C", cost: "€700-900/month", website: "https://www.unipi.it/index.php/english", ranking: "332", language: "Excellent selection of advanced Physics courses in English.", courses: "Particle Physics, Condensed Matter, Astrophysics.", cityInfo: "Famous worldwide for its Leaning Tower, Pisa is a historic university city in Tuscany with a lively student atmosphere and rich history beyond its most famous landmark." }
+            ],
+            "Photonics": [
+                { id: 200, name: "Universite de Limoges", country: "France", city: "Limoges", lat: 45.83, lon: 1.26, weather: "🌷 Spring: 6-16°C, ❄️ Winter: 1-7°C", cost: "€700-900/month", website: "https://www.unilim.fr/", ranking: "1201-1400", language: "Strong photonics research group. English is common in labs, but French is beneficial for daily life.", courses: "Fiber Optics, Laser Physics, Optoelectronics.", cityInfo: "Limoges is famous for its medieval and Renaissance enamels, porcelain, and oak barrels. It's a historic city in a beautiful, green region of France." },
+                { id: 201, name: "Johannes Kepler University Linz", country: "Austria", city: "Linz", lat: 48.33, lon: 14.32, weather: "🌷 Spring: 5-16°C, ❄️ Winter: -3 to 3°C", cost: "€900-1100/month", website: "https://www.jku.at/en/", ranking: "469", language: "Excellent English programs, especially at the graduate level in technical fields.", courses: "Semiconductor Physics, Nanotechnology, Quantum Optics.", cityInfo: "Linz is Austria's third-largest city, a hub of industry and culture on the Danube river. It's known for its vibrant arts scene, modern architecture, and the Ars Electronica Center." },
+                { id: 202, name: "Politecnico di Bari", country: "Italy", city: "Bari", lat: 41.11, lon: 16.87, weather: "🌷 Spring: 11-19°C, ❄️ Winter: 6-13°C", cost: "€650-850/month", website: "https://www.poliba.it/en", ranking: "561-570", language: "Good selection of engineering and science courses offered in English.", courses: "Photonics, Optical Communications, Quantum Electronics.", cityInfo: "Bari is a bustling port city on the Adriatic Sea in Southern Italy. It features a charming old town (Bari Vecchia), a lively waterfront, and is a major gateway to the beautiful Puglia region." },
+                { id: 203, name: "Vrije Universiteit Brussel (VUB)", country: "Belgium", city: "Brussels", lat: 50.82, lon: 4.39, weather: "🌷 Spring: 6-15°C, ❄️ Winter: 1-6°C", cost: "€950-1300/month", website: "https://www.vub.be/en/", ranking: "259", language: "World-renowned photonics program (B-PHOT) with all courses in English.", courses: "Micro-optics, Optical Design, Laser Engineering, Biophotonics.", cityInfo: "Brussels, the capital of Belgium and the de facto capital of the EU, is a vibrant, multilingual hub. It's famous for its Grand-Place, chocolates, waffles, and diverse international community." },
+                { id: 204, name: "University of Peloponnese", country: "Greece", city: "Tripoli", lat: 37.51, lon: 22.38, weather: "🌷 Spring: 8-18°C, ❄️ Winter: 2-10°C", cost: "€600-750/month", website: "https://www.uop.gr/en/", ranking: "1201-1400", language: "English courses are available for Erasmus students, but options may be limited.", courses: "Telecommunication Systems, Materials Science.", cityInfo: "The University is spread across several cities in the Peloponnese region. The main administrative seat is in Tripoli, a city in the heart of Arcadia, known for its central location for exploring the historic Peloponnese peninsula." }
+            ],
+            "School of Foreign Languages": [
+                { id: 2000, name: "Klaipeda State University of Applied Sciences", country: "Lithuania", city: "Klaipeda", lat: 55.70, lon: 21.14, weather: "🌷 Spring: 3-10°C, ❄️ Winter: -4 to 1°C", cost: "€500-700/month", website: "https://www.kvk.lt/en/", ranking: "Not Ranked", language: "The university offers English Philology and other language courses for exchange students.", courses: "English Philology, Translation, Business Language.", cityInfo: "Klaipėda is Lithuania's third-largest city, a vibrant ice-free port on the Baltic Sea. It's known for its German-style architecture, lively cultural scene, and as the gateway to the stunning Curonian Spit." },
+                { id: 2001, name: "Università Telematica e-Campus", country: "Italy", city: "Novedrate", lat: 45.71, lon: 9.13, weather: "🌷 Spring: 8-18°C, ❄️ Winter: 0-6°C", cost: "€750-950/month (for Como region)", website: "https://www.uniecampus.it/en/", ranking: "Not Ranked", language: "This is primarily an online university. Physical attendance may not be required. They offer various language and literature programs.", courses: "Modern Languages and Cultures, Literature, Philology (Online format).", cityInfo: "The main campus is in Novedrate, a small town near the beautiful city of Como and its famous lake. The region is known for its stunning scenery, villas, and proximity to both Milan and the Swiss Alps." }
+            ]
+        };
+
+        let universities = []; // Will be populated after program selection
+        let favoriteIds = new Set();
+        let compareIds = new Set();
+        let currentFilter = 'all';
+        let markers = {};
+        let sidebarShouldReopen = false;
+        let isAppStarted = false;
+
+        // --- UI Elements ---
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const universityList = document.getElementById('university-list');
+        const welcomeModal = document.getElementById('welcome-modal');
+        const welcomeSelectBtn = document.getElementById('welcome-select-btn');
+        const programModal = document.getElementById('program-modal');
+        const programModalCloseBtn = document.getElementById('program-modal-close-btn');
+        const selectProgramBtn = document.getElementById('select-program-btn');
+        const programSearchBox = document.getElementById('program-search-box');
+        const programListContainer = document.getElementById('program-list-container');
+        const detailsModal = document.getElementById('details-modal');
+        const compareModal = document.getElementById('compare-modal');
+        const compareBtn = document.getElementById('compare-btn');
+        const compareFooter = document.getElementById('compare-footer');
+        const clearCompareBtn = document.getElementById('clear-compare-btn');
+        const resetZoomBtn = document.getElementById('reset-zoom-btn');
+
+        // --- Icons ---
+        const defaultIcon = new L.Icon.Default();
+        const highlightIcon = L.icon({
+            iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+            shadowSize: [41, 41]
+        });
+
+
+        // --- Functions ---
+        const renderProgramList = () => {
+            const searchQuery = programSearchBox.value.toLowerCase();
+            let groupedPrograms = {};
+
+            iztechPrograms.forEach(p => {
+                const match = p.faculty.toLowerCase().includes(searchQuery) || p.department.toLowerCase().includes(searchQuery);
+                if (match) {
+                    if (!groupedPrograms[p.faculty]) {
+                        groupedPrograms[p.faculty] = [];
+                    }
+                    groupedPrograms[p.faculty].push(p.department);
+                }
+            });
+
+            programListContainer.innerHTML = '';
+            // Ensure faculties are sorted alphabetically for consistent display
+            Object.keys(groupedPrograms).sort().forEach(faculty => {
+                 const facultyDiv = document.createElement('div');
+                facultyDiv.className = 'mb-4';
+                let departmentList = '';
+                // Departments are already sorted from the main array sort
+                groupedPrograms[faculty].forEach(dept => {
+                    departmentList += `<li class="p-2 hover:bg-indigo-100 cursor-pointer rounded-md" data-department="${dept}">${dept}</li>`;
+                });
+                facultyDiv.innerHTML = `
+                    <h3 class="font-bold text-slate-600 text-lg mb-1 p-2">${faculty}</h3>
+                    <ul class="space-y-1">${departmentList}</ul>
+                `;
+                programListContainer.appendChild(facultyDiv);
+            });
+        };
+
+        const clearMapAndState = () => {
+            universityList.innerHTML = '';
+            for (const markerId in markers) {
+                map.removeLayer(markers[markerId]);
+            }
+            markers = {};
+            universities = [];
+            favoriteIds.clear();
+            compareIds.clear();
+            updateCompareButton();
+        };
+
+        const selectProgram = (departmentName) => {
+            document.getElementById('program-title').innerText = departmentName;
+            programModal.classList.add('hidden');
+            
+            clearMapAndState();
+
+            if (erasmusData[departmentName]) {
+                universities = erasmusData[departmentName];
+                document.getElementById('search-box').classList.remove('hidden');
+                document.getElementById('tabs-container').classList.remove('hidden');
+                selectProgramBtn.innerText = "Change Program";
+                
+                createMarkers();
+                renderUniversityList();
+            } else {
+                universityList.innerHTML = `<li class="p-4 text-slate-500">Sorry, partner university data for this program is not available yet.</li>`;
+                document.getElementById('search-box').classList.add('hidden');
+                document.getElementById('tabs-container').classList.add('hidden');
+                compareFooter.classList.add('hidden');
+                selectProgramBtn.innerText = "Change Program";
+            }
+            if (sidebar.classList.contains('collapsed')) {
+                toggleSidebar();
+            }
+        };
+        
+        const renderUniversityList = () => {
+            universityList.innerHTML = '';
+            const searchQuery = document.getElementById('search-box').value.toLowerCase();
+
+            const filteredUniversities = universities.filter(uni => {
+                const matchesSearch = uni.name.toLowerCase().includes(searchQuery) || uni.country.toLowerCase().includes(searchQuery) || uni.city.toLowerCase().includes(searchQuery);
+                const matchesFilter = currentFilter === 'all' || (currentFilter === 'favorites' && favoriteIds.has(uni.id));
+                return matchesSearch && matchesFilter;
+            });
+            
+            if(filteredUniversities.length === 0 && universities.length > 0) {
+                 universityList.innerHTML = `<li class="p-4 text-slate-500">No universities found.</li>`;
+            }
+
+            filteredUniversities.forEach(uni => {
+                const li = document.createElement('li');
+                li.className = 'flex items-center justify-between p-4 hover:bg-slate-200 border-b border-slate-200';
+                
+                li.innerHTML = `
+                    <div class="flex-grow cursor-pointer" data-id="${uni.id}">
+                        <h2 class="font-semibold text-slate-700">${uni.name}</h2>
+                        <p class="text-sm text-slate-500">${uni.city}, ${uni.country}</p>
+                    </div>
+                    <div class="flex items-center space-x-3 pl-3">
+                        <span class="favorite-btn ${favoriteIds.has(uni.id) ? 'favorited' : ''}" data-id="${uni.id}">&#9733;</span>
+                        <input type="checkbox" class="compare-checkbox h-5 w-5 rounded text-indigo-600 focus:ring-indigo-500" data-id="${uni.id}" ${compareIds.has(uni.id) ? 'checked' : ''}>
+                    </div>
+                `;
+               
+                li.addEventListener('mouseenter', () => markers[uni.id]?.setIcon(highlightIcon));
+                li.addEventListener('mouseleave', () => markers[uni.id]?.setIcon(defaultIcon));
+
+                universityList.appendChild(li);
+            });
+        };
+        
+        const toggleSidebar = () => {
+            sidebar.classList.toggle('collapsed');
+            const icon = document.getElementById('toggle-icon');
+             if (sidebar.classList.contains('collapsed')) {
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>';
+            } else {
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>';
+            }
+            setTimeout(() => map.invalidateSize(), 300);
+        };
+
+        const showDetailsModal = (uniId) => {
+            const uni = universities.find(u => u.id === uniId);
+            document.getElementById('details-modal-title').innerText = uni.name;
+            document.getElementById('details-modal-body').innerHTML = `
+                <div class="space-y-4">
+                    <div><h3 class="font-semibold text-slate-700">Country</h3><p>${uni.country}</p></div>
+                    <div><h3 class="font-semibold text-slate-700">Weather</h3><p>${uni.weather}</p></div>
+                    <div><h3 class="font-semibold text-slate-700">Estimated Monthly Cost</h3><p>${uni.cost}</p></div>
+                    <div><h3 class="font-semibold text-slate-700">QS World Ranking (2024)</h3><p>${uni.ranking}</p></div>
+                    <div><h3 class="font-semibold text-slate-700">Language of Instruction</h3><p>${uni.language}</p></div>
+                    <div><h3 class="font-semibold text-slate-700">Core Course Availability</h3>
+                        <p>Likely offers: ${uni.courses}</p>
+                        <p class="text-xs text-red-600 mt-1"><strong>Disclaimer:</strong> Verify with host university.</p>
+                    </div>
+                    <details>
+                        <summary class="hover:text-indigo-700">Learn About ${uni.city}</summary>
+                        <p class="mt-2 text-slate-600">${uni.cityInfo || 'Information about the city is not available.'}</p>
+                    </details>
+                    <a href="${uni.website}" target="_blank" class="inline-block mt-2 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 transition">Visit Website →</a>
+                </div>`;
+            detailsModal.classList.remove('hidden');
+        };
+
+        const showCompareModal = () => {
+            const selectedUnis = universities.filter(uni => compareIds.has(uni.id));
+            let tableHTML = '<div class="overflow-x-auto"><table class="comparison-table">';
+            
+            tableHTML += '<thead><tr><th>Feature</th>';
+            selectedUnis.forEach(uni => tableHTML += `<th class="uni-name-header">${uni.name}</th>`);
+            tableHTML += '</tr></thead><tbody>';
+
+             const features = {
+                'Country': 'country',
+                'City': 'city',
+                'Est. Monthly Cost': 'cost',
+                'QS Ranking': 'ranking',
+                'Weather': 'weather',
+                'Language': 'language'
+            };
+
+            for(const [label, key] of Object.entries(features)) {
+                tableHTML += `<tr><td><strong>${label}</strong></td>`;
+                selectedUnis.forEach(uni => tableHTML += `<td>${uni[key]}</td>`);
+                tableHTML += '</tr>';
+            }
+            
+            tableHTML += '</tbody></table></div>';
+            document.getElementById('compare-modal-body').innerHTML = tableHTML;
+            compareModal.classList.remove('hidden');
+        };
+        
+        const updateCompareButton = () => {
+            const count = compareIds.size;
+            if (count > 0) {
+                compareFooter.classList.remove('hidden');
+            } else {
+                compareFooter.classList.add('hidden');
+            }
+
+            if (count >= 2) {
+                compareBtn.disabled = false;
+                compareBtn.innerText = `Compare ${count} Universities`;
+            } else {
+                compareBtn.disabled = true;
+                compareBtn.innerText = 'Select at least 2 to compare';
+            }
+        };
+
+        const createMarkers = () => {
+            universities.forEach(uni => {
+                const marker = L.marker([uni.lat, uni.lon], {icon: defaultIcon}).addTo(map);
+                marker.on('click', () => {
+                    showDetailsModal(uni.id);
+                    if (!sidebar.classList.contains('collapsed')) {
+                        toggleSidebar();
+                        sidebarShouldReopen = true;
+                    } else {
+                        sidebarShouldReopen = false;
+                    }
+                });
+                markers[uni.id] = marker;
+            });
+        };
+
+        const closeModal = (modalElement) => {
+            if (!modalElement || modalElement.classList.contains('hidden')) return;
+
+            const wasDetailsModal = modalElement.id === 'details-modal';
+            const wasProgramModal = modalElement.id === 'program-modal';
+            const wasCompareModal = modalElement.id === 'compare-modal';
+
+            modalElement.classList.add('hidden');
+
+            if (wasDetailsModal && sidebarShouldReopen) {
+                if (sidebar.classList.contains('collapsed')) {
+                    toggleSidebar();
+                }
+                sidebarShouldReopen = false;
+            } else if ((wasProgramModal || wasCompareModal) && sidebar.classList.contains('collapsed')) {
+                toggleSidebar();
+            }
+        };
+
+
+        // --- Event Listeners ---
+        sidebarToggle.addEventListener('click', toggleSidebar);
+
+        welcomeSelectBtn.addEventListener('click', () => {
+            welcomeModal.classList.add('hidden');
+            programModalCloseBtn.style.display = 'none'; // Hide close button on first view
+            programModal.classList.remove('hidden');
+        });
+
+        selectProgramBtn.addEventListener('click', () => {
+            programModalCloseBtn.style.display = 'block'; // Ensure close button is visible for subsequent views
+            programModal.classList.remove('hidden');
+            if (!sidebar.classList.contains('collapsed')) {
+                toggleSidebar();
+            }
+        });
+        programSearchBox.addEventListener('input', renderProgramList);
+        programListContainer.addEventListener('click', (e) => {
+            if (e.target.tagName === 'LI') {
+                selectProgram(e.target.dataset.department);
+                isAppStarted = true; // Set only after the first successful program selection
+            }
+        });
+        
+        universityList.addEventListener('click', (e) => {
+            const target = e.target;
+            const uniInfoDiv = target.closest('.flex-grow');
+            
+            if (uniInfoDiv) {
+                const uniId = parseInt(uniInfoDiv.dataset.id);
+                const uni = universities.find(u => u.id === uniId);
+                if (uni) {
+                    map.flyTo([uni.lat, uni.lon], 13);
+                    showDetailsModal(uniId);
+                    if (!sidebar.classList.contains('collapsed')) {
+                        toggleSidebar();
+                        sidebarShouldReopen = true;
+                    } else {
+                        sidebarShouldReopen = false;
+                    }
+                }
+            }
+            
+            if (target.classList.contains('favorite-btn')) {
+                e.stopPropagation();
+                const uniId = parseInt(target.dataset.id);
+                if (favoriteIds.has(uniId)) {
+                    favoriteIds.delete(uniId);
+                } else {
+                    favoriteIds.add(uniId);
+                }
+                if (currentFilter === 'favorites') {
+                    renderUniversityList();
+                } else {
+                    target.classList.toggle('favorited');
+                }
+            }
+            if (target.classList.contains('compare-checkbox')) {
+                e.stopPropagation();
+                const uniId = parseInt(target.dataset.id);
+                if (target.checked) {
+                    compareIds.add(uniId);
+                } else {
+                    compareIds.delete(uniId);
+                }
+                updateCompareButton();
+            }
+        });
+
+        clearCompareBtn.addEventListener('click', () => {
+            compareIds.clear();
+            renderUniversityList();
+            updateCompareButton();
+        });
+
+        compareBtn.addEventListener('click', () => {
+            showCompareModal();
+            if (!sidebar.classList.contains('collapsed')) {
+                toggleSidebar();
+            }
+        });
+        
+        resetZoomBtn.addEventListener('click', () => {
+            map.setView([50, 15], 4);
+        });
+        
+        document.getElementById('search-box').addEventListener('input', renderUniversityList);
+        
+        document.querySelectorAll('[data-filter]').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const activeBtn = document.querySelector('[data-filter].bg-white');
+                if (activeBtn) {
+                     activeBtn.classList.remove('bg-white', 'border-indigo-500', 'text-indigo-600');
+                     activeBtn.classList.add('text-slate-500');
+                }
+                e.currentTarget.classList.add('bg-white', 'border-indigo-500', 'text-indigo-600');
+                e.currentTarget.classList.remove('text-slate-500');
+                currentFilter = e.currentTarget.dataset.filter;
+                renderUniversityList();
+            });
+        });
+
+        document.querySelectorAll('.close-modal-btn').forEach(btn => btn.addEventListener('click', (e) => {
+            if (!isAppStarted && e.target.closest('.modal-container').id === 'program-modal') {
+                return; // Don't close program modal if app hasn't started
+            }
+            closeModal(e.target.closest('.modal-container'));
+        }));
+        
+        document.querySelectorAll('.modal-container').forEach(modal => {
+             modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    if (modal.id === 'welcome-modal') return;
+                    if (!isAppStarted && modal.id === 'program-modal') return;
+                    closeModal(modal);
+                }
+            });
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (document.getElementById('welcome-modal').classList.contains('hidden')) {
+                    if (!isAppStarted && !document.getElementById('program-modal').classList.contains('hidden')) {
+                        return;
+                    }
+                    closeModal(document.getElementById('details-modal'));
+                    closeModal(document.getElementById('program-modal'));
+                    closeModal(document.getElementById('compare-modal'));
+                }
+            }
+        });
+        
+        map.on('click', () => {
+            if (isAppStarted && !sidebar.classList.contains('collapsed')) {
+                toggleSidebar();
+            }
+        });
+
+
+        // Initial Load
+        renderProgramList(); // Pre-populate the modal list
+    </script>
+</body>
+</html>
+
