@@ -4,7 +4,7 @@ An interactive, mapping tool designed for students at İzmir Institute of Techno
 
 ## 🔗 Live Demo
 
-(Note: Replace this link with your actual GitHub Pages URL once deployed)
+(https://troprak.github.io/IZTECH-ERASMUS-MAP/)
 
 ## 📌 Project Overview
 
@@ -34,14 +34,15 @@ Navigating international exchange agreements can be overwhelming due to fragment
 
 Clone the repository:
 
-git clone [https://github.com/your-username/iztech-erasmus-map.git](https://github.com/your-username/iztech-erasmus-map.git)
+git clone [https://troprak.github.io/IZTECH-ERASMUS-MAP/.git]
 
 
 Open *index.html* in any modern web browser.
 
-## ⚖️ #License
+## ⚖️ License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 
 Created as a tool for the IZTECH community to streamline the Erasmus application process.
+
